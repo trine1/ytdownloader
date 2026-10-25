@@ -226,6 +226,17 @@ class DownloadManager(QObject):
             self._completed.clear()
             self.queue_changed.emit()
 
+    def clear_downloaded(self) -> None:
+        """Clear completed and failed items from the Downloads list.
+
+        Active, paused, and queued items are untouched — use the per-row ✕
+        to remove those individually.
+        """
+        if self._completed or self._failed:
+            self._completed.clear()
+            self._failed.clear()
+            self.queue_changed.emit()
+
     # ---- pause / resume --------------------------------------------------
     def pause_item(self, item: DownloadItem) -> None:
         """Pause a download (running, retry-scheduled, or pending).

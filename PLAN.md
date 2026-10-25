@@ -218,3 +218,20 @@ Added to PLAN.md (Basic requirements + Features):
   group. Verified by widget-tree introspection (only "Downloads" group box
   remains; Settings dialog group boxes untouched).
 - Released as v0.3.1 (deb + generic installer + SHA256SUMS).
+
+### v0.3.2 — button row rework (2026-10-25)
+- Removed **Add to queue**; **Download now** renamed **Download** (same
+  front-of-queue, start-immediately behaviour — the button now reads simply
+  "Download").
+- **Pause all** renamed **Pause downloads** (flips to "Resume downloads")
+  and moved to the right-hand side; **Clear list** renamed **Clear downloaded**
+  and also placed right. "Clear downloaded" now deletes only completed and
+  failed rows (new `manager.clear_downloaded()`); active/paused/queued items
+  are removed individually via ✕.
+- Added breathing-room spacing above the merged "Downloads" heading (gap
+  measured 54 px between the options row and the group top).
+- Verified programmatically (button labels/order/geometry X, gap size, clear
+  semantics, front-insert flow with input reset); screenshot rendered for the
+  record. Note: the vision review subagent was unavailable this session, so
+  visual confirmation relied on the geometry assertions above.
+- Released as v0.3.2 (deb + generic installer + SHA256SUMS).

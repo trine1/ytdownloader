@@ -1,3 +1,14 @@
+ytdownloader (0.3.2-1) bookworm; urgency=medium
+
+  * Button row rework: single "Download" button (replaces "Download now" and
+    "Add to queue"); "Pause all" renamed "Pause downloads" and "Clear list"
+    renamed "Clear downloaded", both moved to the right-hand side. Clear
+    downloaded now removes only completed/failed items; per-row ✕ handles
+    everything else.
+  * Extra spacing above the merged "Downloads" heading.
+
+ -- User <user@example.com>  Sun, 25 Oct 2026 20:15:00 +0000
+
 ytdownloader (0.3.1-1) bookworm; urgency=medium
 
   * UI polish: removed the "Source" and "Options" section headings; the URL

@@ -52,8 +52,12 @@ python -m yt_downloader
 - **Validation before download**: each URL/ID is validated immediately as you
   type and, once confirmed, the video's **full title** is shown so you can
   verify it is the file you want.
-- **Explicit start only**: nothing downloads until you press either
-  **Download now** (starts at the front of the queue) or **Add to queue**.
+- **Explicit start only**: nothing downloads until you press **Download**
+  (starts immediately, ahead of items already waiting).
+- **Pause downloads / Clear downloaded** sit on the right of the button row:
+  pause pauses every active and pending item at once (persists across
+  restart); clear removes only completed/failed items — per-row ✕ removes
+  anything else individually.
 - **Audio only (best quality)** or **video + audio (highest resolution,
   merged with ffmpeg)**.
 - **Queueing with parallel downloads**: up to N concurrent downloads (N set in
@@ -62,9 +66,10 @@ python -m yt_downloader
 - **Pause / Resume** on each active download: pause stops the worker without
   counting as a failure; resume continues the partial file
   (`yt-dlp --continue`).
-- **Pause all**: pauses every active download *and* every pending item at
-  once. The paused state is saved and restored, so it survives a restart —
-  press the button again ("Resume all") to continue everything.
+- **Pause downloads**: pauses every active download *and* every pending item
+  at once (button top-right; label flips to "Resume downloads"). The paused
+  state is saved and restored, so it survives a restart — press the button
+  again to continue everything.
 - **Auto-retry with exponential backoff**: failed attempts are retried after
   N seconds doubling up to a 5-minute cap, up to 10 attempts (customisable via
   **Settings → Preferences**).

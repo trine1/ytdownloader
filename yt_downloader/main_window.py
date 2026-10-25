@@ -322,24 +322,24 @@ class MainWindow(QMainWindow):
 
         # ---- Actions ------------------------------------------------------
         actions = QHBoxLayout()
-        self.download_now_btn = QPushButton("Download now")
-        self.download_now_btn.setFixedWidth(120)
-        self.download_now_btn.setEnabled(False)
-        self.download_now_btn.setToolTip("Start this download immediately (ahead of queued items)")
-        self.add_queue_btn = QPushButton("Add to queue")
-        self.add_queue_btn.setFixedWidth(110)
-        self.add_queue_btn.setEnabled(False)
-        self.add_queue_btn.setToolTip("Queue this download; it starts when a slot is free")
-        self.pause_all_btn = QPushButton("Pause all")
-        self.pause_all_btn.setFixedWidth(100)
-        self.pause_all_btn.setToolTip("Pause every active and pending download (survives restart)")
-        self.clear_btn = QPushButton("Clear list")
-        self.clear_btn.setFixedWidth(90)
-        self.clear_btn.setToolTip("Remove everything from the Downloads list")
-        for b in (self.download_now_btn, self.add_queue_btn, self.pause_all_btn, self.clear_btn):
-            actions.addWidget(b)
+        self.download_btn = QPushButton("Download")
+        self.download_btn.setFixedWidth(110)
+        self.download_btn.setEnabled(False)
+        self.download_btn.setToolTip("Start this download immediately")
+        actions.addWidget(self.download_btn)
         actions.addStretch(1)
+        self.pause_all_btn = QPushButton("Pause downloads")
+        self.pause_all_btn.setFixedWidth(150)
+        self.pause_all_btn.setToolTip(
+            "Pause every active and pending download (survives restart)"
+        )
+        actions.addWidget(self.pause_all_btn)
+        self.clear_btn = QPushButton("Clear downloaded")
+        self.clear_btn.setFixedWidth(150)
+        self.clear_btn.setToolTip("Remove completed and failed items from the list")
+        actions.addWidget(self.clear_btn)
         layout.addLayout(actions)
+        layout.addSpacing(14)   # breathing room above the Downloads heading
 
         # ---- Downloads (single merged section) -----------------------------
         downloads = QGroupBox("Downloads")
@@ -348,6 +348,7 @@ class MainWindow(QMainWindow):
         self.downloads_list.setMinimumHeight(300)
         downloads_layout.addWidget(self.downloads_list)
         layout.addWidget(downloads)
+        layout.addStretch(0)
 
         self.status_label = QLabel("Ready")
         self.status_label.setStyleSheet("color: #333;")
@@ -357,8 +358,7 @@ class MainWindow(QMainWindow):
     def _connect_signals(self) -> None:
         self.url_input.textChanged.connect(self._on_url_changed)
         self.browse_btn.clicked.connect(self._on_browse)
-        self.download_now_btn.clicked.connect(self._on_download_now)
-        self.add_queue_btn.clicked.connect(self._on_add_to_queue)
+        self.download_btn.clicked.connect(self._on_download_now)
         self.pause_all_btn.clicked.connect(self._on_pause_all)
         self.clear_btn.clicked.connect(self._on_clear_clicked)
 
@@ -399,8 +399,7 @@ class MainWindow(QMainWindow):
         self._validated_title = None
         self.validation_label.setText("Enter a URL or ID to validate")
         self.validation_label.setStyleSheet("color: #666; font-style: italic;")
-        self.download_now_btn.setEnabled(False)
-        self.add_queue_btn.setEnabled(False)
+        self.download_btn.setEnabled(False)
         if text.strip():
             self._validation_timer.start()
 
@@ -424,8 +423,7 @@ class MainWindow(QMainWindow):
             self.validation_label.setText(f"✗  Invalid: {title_or_error}")
             self.validation_label.setStyleSheet("color: #a00; font-weight: bold;")
         enabled = bool(self.url_input.text().strip()) and ok
-        self.download_now_btn.setEnabled(enabled)
-        self.add_queue_btn.setEnabled(enabled)
+        self.download_btn.setEnabled(enabled)
 
     # ------------------------------------------------------------------ queue / download
     def _on_browse(self) -> None:
@@ -453,19 +451,11 @@ class MainWindow(QMainWindow):
         self._manager.add_now(*target)
         self._reset_validation_input()
 
-    def _on_add_to_queue(self) -> None:
-        target = self._validated_target()
-        if target is None:
-            return
-        self._manager.add(*target)
-        self._reset_validation_input()
-
     def _reset_validation_input(self) -> None:
         self.url_input.clear()
         self._validated_url = None
         self._validated_title = None
-        self.download_now_btn.setEnabled(False)
-        self.add_queue_btn.setEnabled(False)
+        self.download_btn.setEnabled(False)
         self.validation_label.setText("Enter a URL or ID to validate")
         self.validation_label.setStyleSheet("color: #666; font-style: italic;")
 
@@ -483,8 +473,8 @@ class MainWindow(QMainWindow):
         )
 
     def _on_clear_clicked(self) -> None:
-        self._manager.clear_queue()
-        self.status_label.setText("Ready")
+        self._manager.clear_downloaded()
+        self.status_label.setText("Completed and failed items cleared")
 
     # ------------------------------------------------------------------ merged Downloads list
     def _refresh_downloads(self) -> None:
@@ -499,9 +489,9 @@ class MainWindow(QMainWindow):
             self.downloads_list.setItemWidget(li, row)
             self._row_registry[item] = li
         if self._has_anything_paused():
-            self.pause_all_btn.setText("Resume all")
+            self.pause_all_btn.setText("Resume downloads")
         elif not self._manager._paused_items:
-            self.pause_all_btn.setText("Pause all")
+            self.pause_all_btn.setText("Pause downloads")
 
     def _row_widget(self, item: DownloadItem):
         li = self._row_registry.get(item)
@@ -598,7 +588,7 @@ class MainWindow(QMainWindow):
 
         self._refresh_downloads()
         if self._has_anything_paused():
-            self.pause_all_btn.setText("Resume all")
+            self.pause_all_btn.setText("Resume downloads")
         self._state_save_timer.start()
 
     # ------------------------------------------------------------------ exit
