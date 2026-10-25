@@ -319,3 +319,23 @@ Added to PLAN.md (Basic requirements + Features):
   across 345 monitor ticks, no mid-download teardown storms (rebuild count 18
   total incl. toggles + title resolution), no modal/lockups.
 - Released as v0.3.6 (deb + generic installer + SHA256SUMS).
+
+### v0.3.7 — canonical duplicate matching (2026-10-25)
+- **Canonical source key**: duplicate detection now reduces YouTube link
+  shapes to their video id before comparison — `www.youtube.com/watch?v=ID`,
+  `m.youtube.com/watch?v=ID`, `youtu.be/ID`, `youtube.com/shorts/ID`,
+  `/embed/`, `/live/` and bare IDs all count as ONE source (per format).
+  Previously the desktop and mobile links of the same clip could both slip
+  through the no-duplicate guard.
+- Investigated the reported "controls missing between download finishing and
+  the program acknowledging": instrumented the window explicitly (real
+  downloads of the reported sources — 76-char BBC news title and a
+  m.youtube.com link — with the acknowledgement artificially delayed 5–8 s
+  and both downloads run concurrently, 250 ms polling of every row widget,
+  bar visibility/enabled/button/✕ state across the whole transition).
+  Result: rows continuously carry all controls; zero anomalies across both
+  single and concurrent runs; conclusion: consistent with the v0.3.5/v0.3.6
+  hardening (deferred rebuilds + no-op refresh skip + terminal scrub) rather
+  than a current-code regression. The canonical match also prevents the
+  same clip entering twice via different host links.
+- Released as v0.3.7 (deb + generic installer + SHA256SUMS).

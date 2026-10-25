@@ -3,12 +3,32 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 from typing import Any, Dict, List, Optional
 
 from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 
 from .worker import DownloadItem, Worker, format_seconds
+
+# Canonical source key for duplicate detection: most YouTube link shapes can
+# be reduced to their 11-character video id.
+_SOURCE_ID_RES = tuple(
+    re.compile(pattern) for pattern in (
+        r"[?&]v=([A-Za-z0-9_-]{11})(?:&|$)",
+        r"youtu\.be/([A-Za-z0-9_-]{11})",
+        r"/(?:shorts|embed|live)/([A-Za-z0-9_-]{11})",
+    )
+)
+
+
+def _canonical_source(url: str) -> str:
+    """Reduce a YouTube URL of any shape to its video id, else pass through."""
+    for res in _SOURCE_ID_RES:
+        m = res.search(url or "")
+        if m:
+            return m.group(1)
+    return url or ""
 
 
 class DownloadManager(QObject):
@@ -89,13 +109,17 @@ class DownloadManager(QObject):
     def matching_item(self, url: str, kind: str) -> Optional[DownloadItem]:
         """An existing item for the same (source, format) pair, in any state.
 
-        Completed and failed items are included so callers can offer to
-        re-download; queued/active/paused/scheduled items represent live
-        work. Note the same source in a DIFFERENT format is a separate item
-        (audio and video files have distinct names on disk).
+        Sources are compared canonically: watch?v=ID, youtu.be/ID,
+        m.youtube.com/watch?v=ID and /shorts/ID all count as the same video,
+        so e.g. the desktop and mobile links of one clip are recognised as
+        duplicates. Completed and failed items are included so callers can
+        offer to re-download. The same source in a DIFFERENT format is a
+        separate item (the filenames differ on disk).
         """
         def same(it: DownloadItem) -> bool:
-            return it.url == url and it.kind == kind
+            return (it.url == url
+                    or _canonical_source(it.url) == _canonical_source(url)) \
+                and it.kind == kind
         for pool in (list(self._active.values()), self._paused_items,
                      self._queue, self._scheduled_retries,
                      self._completed, self._failed):
