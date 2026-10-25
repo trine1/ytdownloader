@@ -243,3 +243,18 @@ Added to PLAN.md (Basic requirements + Features):
   GUI: buttons at y=549 below the frame bottom y=542, right-aligned
   (x=585/741), status label beneath.
 - Released as v0.3.3 (deb + generic installer + SHA256SUMS).
+
+### v0.3.4 — source field polish (2026-10-25)
+- "Source" label placed on the same row as the URL input field (label left
+  of the field).
+- The source field is never auto-populated at startup: the saved
+  ``url_input`` key is no longer written (state file no longer carries it;
+  older files are loaded without error and the value ignored) and no restore
+  is performed — the field always starts empty, which also avoids an
+  automatic validation round-trip at launch.
+- Validation success message now renders "✓  <title>" (the "Ready to
+  download" prefix was dropped; the tick remains).
+- Verified offscreen: field empty despite a legacy ``url_input`` in state,
+  label/input share one row (same y), tick message exact, no url_input key in
+  freshly saved state.
+- Released as v0.3.4 (deb + generic installer + SHA256SUMS).

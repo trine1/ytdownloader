@@ -60,12 +60,12 @@ def save_state(
     settings: dict[str, Any],
     queue_items: list[DownloadItem],
     active_items: list[DownloadItem],
-    url_input: str = "",
 ) -> None:
     """Persist the current application state to disk.
 
     Writes to a temporary file and atomically renames it so that a crash
-    mid-write never leaves a corrupt state file.
+    mid-write never leaves a corrupt state file. (The Source input text is
+    deliberately not saved — it is not auto-populated on startup.)
     """
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     payload = {
@@ -73,7 +73,6 @@ def save_state(
         "settings": settings,
         "queue": [_item_to_dict(it) for it in queue_items],
         "active": [_item_to_dict(it) for it in active_items],
-        "url_input": url_input,
     }
     tmp = STATE_FILE.with_suffix(".json.tmp")
     with open(tmp, "w", encoding="utf-8") as f:
@@ -84,9 +83,10 @@ def save_state(
 def load_state() -> Optional[dict[str, Any]]:
     """Load persisted state from disk.
 
-    Returns a dict with keys ``settings``, ``queue`` (list of dicts),
-    ``active`` (list of dicts), and ``url_input``, or ``None`` if no valid
-    state file exists.
+    Returns a dict with keys ``settings``, ``queue`` (list of dicts) and
+    ``active`` (list of dicts), or ``None`` if no valid state file exists.
+    Older state files that included a ``url_input`` key are accepted; that
+    value is ignored.
     """
     try:
         with open(STATE_FILE, "r", encoding="utf-8") as f:

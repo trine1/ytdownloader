@@ -287,19 +287,20 @@ class MainWindow(QMainWindow):
         version_action.setStatusTip("Show the current version of this tool")
         version_action.triggered.connect(self._show_version)
 
-        # ---- Source (no heading) ------------------------------------------
-        src_layout = QVBoxLayout()
-        src_layout.setContentsMargins(0, 0, 0, 0)
+        # ---- Source (label inline with the input) --------------------------
+        src_row = QHBoxLayout()
+        src_row.addWidget(QLabel("Source"))
         self.url_input = QLineEdit()
         self.url_input.setPlaceholderText(
             "YouTube URL or video ID (e.g. dQw4w9WgXcQ); invidious URLs accepted"
         )
+        src_row.addWidget(self.url_input, stretch=1)
+        layout.addLayout(src_row)
+
         self.validation_label = QLabel("Enter a URL or ID to validate")
         self.validation_label.setStyleSheet("color: #666; font-style: italic;")
         self.validation_label.setWordWrap(True)
-        src_layout.addWidget(self.url_input)
-        src_layout.addWidget(self.validation_label)
-        layout.addLayout(src_layout)
+        layout.addWidget(self.validation_label)
 
         # ---- Options (no heading) -----------------------------------------
         opt_layout = QHBoxLayout()
@@ -420,7 +421,7 @@ class MainWindow(QMainWindow):
         if ok:
             self._validated_url = resolved_url
             self._validated_title = title_or_error
-            self.validation_label.setText(f"✓  Ready to download:  {title_or_error}")
+            self.validation_label.setText(f"✓  {title_or_error}")
             self.validation_label.setStyleSheet("color: #0a0; font-size: 13px; font-weight: bold;")
         else:
             self._validated_url = None
@@ -565,7 +566,6 @@ class MainWindow(QMainWindow):
             settings=self._settings,
             queue_items=self._manager.queue_items(),
             active_items=self._manager.active_items(),
-            url_input=self.url_input.text(),
         )
 
     def _load_state(self) -> None:
@@ -587,9 +587,7 @@ class MainWindow(QMainWindow):
         # Completed downloads are intentionally NOT restored.
         self._manager.restore(self._settings, queue_items, active_items)
 
-        url_input = payload.get("url_input", "")
-        if url_input:
-            self.url_input.setText(url_input)
+        # Note: the Source field is intentionally left empty on startup.
 
         self._refresh_downloads()
         if self._has_anything_paused():
