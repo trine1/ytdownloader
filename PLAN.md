@@ -161,3 +161,23 @@ Added to PLAN.md (Basic requirements + Features):
 - **Pause all** button: flags every pending queue item `paused` and moves active items into the paused set; `_start_next` skips paused items (no tight-loop). Because paused flags and paused limbo items are part of saved state, the pause persists across restarts (button reads "Resume all"); Resume all un-pauses everything, previously-downloading items first, resuming partial files with `-c`.
 - Also fixed: `clear_queue` no longer permanently blocks starting (`_stop_all` reset shortly after clear); retry-scheduled items are honoured by Pause all; restoring paused previously-active items emits rows so the UI shows them.
 - Verified: manager unit tests (skip-paused scheduling, no infinite loop, removal without retry, add_now priority), pause-all + save/restore + resume-all round trip, in-session completed shown vs not restored, invidious URL passthrough, GUI launch.
+
+### GitHub Releases (2026-10-25)
+- New generic, distribution-neutral installer builder: `build_installer.py`
+  produces a single self-extracting bash script
+  `ytdownloader-<version>-linux-installer.sh`.
+  - Payload: pyproject.toml + yt_downloader/*.py + .desktop (base64 tar.gz
+    appended after a marker, extracted with awk/tail/base64/tar).
+  - Installs to `~/.local/share/ytdownloader` (isolated venv, pip installs
+    PyQt6 + yt-dlp from PyPI), creates `~/.local/bin/ytdownloader` (exports
+    app bin/venv bin onto PATH), writes a desktop entry, supports `--prefix`,
+    `--no-ffmpeg`, `--uninstall`, `--help`.
+  - If ffmpeg is missing system-wide on x86_64, downloads a static
+    ffmpeg/ffprobe into the app bin dir (skippable).
+  - Tested full install round-trip in a sandboxed HOME (venv + pip + launcher
+    arg handling + uninstall); fixed heredoc `$@` expansion and `set -u`
+    marker lookup during development.
+- Release `v0.2.0` published on GitHub with:
+  - `ytdownloader_0.2.0_amd64.deb` (Debian/LMDE 7)
+  - `ytdownloader-0.2.0-linux-installer.sh` (any distro)
+  - `SHA256SUMS.txt` (sha256 checksums)

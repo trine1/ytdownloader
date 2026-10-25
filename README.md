@@ -108,6 +108,34 @@ corrupt state file.
   build with `dpkg-buildpackage -us -uc` after installing `debhelper`, or run
   `python build_deb.py` (needs only Python) to produce
   `ytdownloader_<version>_amd64.deb`.
+- Standalone distribution-neutral installer for any distro:
+  run `python build_installer.py` to produce a single self-extracting script
+  `ytdownloader-<version>-linux-installer.sh`:
+
+  ```bash
+  bash ytdownloader-0.2.0-linux-installer.sh            # install to ~/.local
+  bash ytdownloader-0.2.0-linux-installer.sh --help     # options
+  bash ytdownloader-0.2.0-linux-installer.sh --uninstall
+  ```
+
+  It installs into `~/.local/share/ytdownloader` (isolated venv), pip-installs
+  PyQt6 and yt-dlp from PyPI (internet needed once at install time), creates
+  `~/.local/bin/ytdownloader` and a desktop entry, and — if ffmpeg is missing
+  system-wide — downloads a static x86_64 build automatically (this step can
+  be skipped with `--no-ffmpeg`). Requires Python ≥ 3.10 and a graphical
+  desktop session. Existing state (saved downloads) is preserved across
+  installs and upgrades.
+
+## Releases
+
+Signed-hash artifacts are published on GitHub Releases
+(<https://github.com/trine1/ytdownloader/releases>) per version:
+
+| Artifact | For |
+|----------|-----|
+| `ytdownloader_<version>_amd64.deb` | Debian/Linux Mint LMDE 7 (apt/dpkg) |
+| `ytdownloader-<version>-linux-installer.sh` | Any distribution (self-extracting, no package manager needed) |
+| `SHA256SUMS.txt` | Checksums for verifying the above files |
 
 ## Project status
 
