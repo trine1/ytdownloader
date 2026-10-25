@@ -60,6 +60,7 @@ class DownloadItem:
     url: str          # resolved YouTube URL
     kind: str         # "audio" or "video"
     output_dir: str   # destination directory
+    title: str = ""   # human-friendly title (empty until resolved)
     attempts: int = 0                 # how many times this item has been tried
     max_attempts: int = 10            # total attempts allowed (1 + retries)
     initial_backoff: int = 5          # seconds before first retry
@@ -93,6 +94,7 @@ class Worker(QThread):
     progress = pyqtSignal(int, int)          # percent (0-100), eta seconds
     status = pyqtSignal(str)                 # free-form status text
     finished = pyqtSignal(bool, str, str)    # success, message, destination_path
+    resolved_title = pyqtSignal(str)         # human-friendly title (from output)
 
     # ---- public API ------------------------------------------------------
     def __init__(self, parent=None) -> None:
@@ -157,17 +159,21 @@ class Worker(QThread):
         args = [
             "yt-dlp",
             "--no-playlist",
+            "--socket-timeout",
+            "15",
             "--extractor-args",
             "youtube:player_client=android",
             "--print",
-            "id:%(id)s|title:%(title)s",
+            "id:%(id)s",
+            "--print",
+            "title:%(title)s",
             self._url,
         ]
         try:
             self._proc = subprocess.Popen(
                 args,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
                 text=True,
             )
         except FileNotFoundError:
@@ -183,12 +189,8 @@ class Worker(QThread):
         assert self._proc.stdout is not None
         for line in self._proc.stdout:
             line = line.strip()
-            if line.startswith("id:"):
-                for kv in line[3:].split("|"):
-                    if ":" in kv:
-                        key, value = kv.split(":", 1)
-                        if key == "title":
-                            title = value
+            if title == "" and line.startswith("title:"):
+                title = line[len("title:"):].strip()
         returncode = self._proc.wait()
         self._proc = None
 
@@ -263,6 +265,15 @@ class Worker(QThread):
             dest_match = DESTINATION_RE.search(line)
             if dest_match:
                 self._destination = dest_match.group("path").strip()
+                # Derive the human-friendly title from the first destination
+                # filename we see (yt-dlp keeps the video title, sanitised).
+                item = self._item
+                if item is not None and not getattr(item, "title", ""):
+                    stem = os.path.splitext(self._destination)[0]
+                    title = os.path.basename(stem).strip()
+                    if title:
+                        item.title = title
+                        self.resolved_title.emit(title)
 
         returncode = self._proc.wait() if self._proc is not None else 1
         self._proc = None

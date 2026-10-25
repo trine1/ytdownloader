@@ -51,6 +51,7 @@ class DownloadManager(QObject):
         self._completed: List[DownloadItem] = []
         self._failed: List[DownloadItem] = []
         self._validation_workers: set = set()
+        self._title_workers: set = set()
         self._paused_workers: set = set()   # workers stopped by user pause
         self._cancelled_workers: set = set()  # workers stopped for removal
         self._global_paused = False         # set by pause_all()
@@ -85,27 +86,29 @@ class DownloadManager(QObject):
         worker.finished.connect(lambda *_: worker.deleteLater())
         worker.validate(text)
 
-    def _make_item(self, url: str, kind: str, output_dir: str) -> DownloadItem:
+    def _make_item(self, url: str, kind: str, output_dir: str,
+                   title: str = "") -> DownloadItem:
         return DownloadItem(
             url=url,
             kind=kind,
             output_dir=output_dir,
+            title=title or "",
             max_attempts=self._default_max_attempts,
             initial_backoff=self._default_initial_backoff,
             max_backoff=self._default_max_backoff,
         )
 
-    def add(self, url: str, kind: str, output_dir: str) -> DownloadItem:
-        """Append *url* to the end of the waiting queue ("Add to queue")."""
-        item = self._make_item(url, kind, output_dir)
+    def add(self, url: str, kind: str, output_dir: str, title: str = "") -> DownloadItem:
+        """Append *url* to the end of the waiting queue ("Download")."""
+        item = self._make_item(url, kind, output_dir, title)
         self._queue.append(item)
         self.queue_changed.emit()
         self._start_next()
         return item
 
-    def add_now(self, url: str, kind: str, output_dir: str) -> DownloadItem:
-        """Insert *url* at the front of the queue ("Download now")."""
-        item = self._make_item(url, kind, output_dir)
+    def add_now(self, url: str, kind: str, output_dir: str, title: str = "") -> DownloadItem:
+        """Insert *url* at the front of the queue ("Download")."""
+        item = self._make_item(url, kind, output_dir, title)
         self._queue.insert(0, item)
         self.queue_changed.emit()
         self._start_next()
@@ -254,6 +257,7 @@ class DownloadManager(QObject):
                     self._paused_items.append(item)
                 worker.stop()
                 self.item_status.emit(item, "Paused")
+                self.queue_changed.emit()
                 return
         if item in self._scheduled_retries:
             item.paused = True
@@ -356,6 +360,14 @@ class DownloadManager(QObject):
         for item in self._queue:
             if item.paused:
                 self.item_status.emit(item, "Paused")
+        # Fetch friendly titles for restored items that lack one (background).
+        items_without_title = [
+            it
+            for it in list(self._queue) + list(self._paused_items)
+            if not getattr(it, "title", "")
+        ]
+        if items_without_title:
+            QTimer.singleShot(200, lambda: self.resolve_missing_titles(items_without_title))
 
     # ---- internal: starting / retrying -----------------------------------
     def _start_next(self, increment_attempts: bool = True) -> None:
@@ -392,8 +404,59 @@ class DownloadManager(QObject):
                 w, it, ok, msg, dest
             )
         )
+        worker.resolved_title.connect(
+            lambda title, w=worker, it=item: self._on_worker_title(it, title)
+        )
         self.item_started.emit(item)
         worker.download(item, resume=item.resume)
+
+    def _on_worker_title(self, item: DownloadItem, title: str) -> None:
+        """Adopt a title yt-dlp derived while downloading; refresh rows once."""
+        if not title:
+            return
+        if not getattr(item, "title", ""):
+            item.title = title
+            self.queue_changed.emit()
+
+    # ---- background title resolution (state-restored items) ---------------
+    def resolve_missing_titles(self, items: List[DownloadItem]) -> None:
+        """Fetch titles for *items* one at a time in the background.
+
+        Only used for items restored from state that have no title yet. Runs
+        one lightweight yt-dlp print for each, spaced out; failed lookups are
+        skipped silently (rows fall back to showing the URL).
+        """
+        if self._stop_all:
+            return
+        missing = [it for it in items if not getattr(it, "title", "")]
+        self._fetch_title_chain(missing)
+
+    def _fetch_title_chain(self, items: List[DownloadItem]) -> None:
+        if self._stop_all or not items:
+            return
+        target, rest = items[0], items[1:]
+        if getattr(target, "title", ""):
+            self._fetch_title_chain(rest)
+            return
+        worker = Worker()
+        self._title_workers.add(worker)
+
+        def done(ok: bool, url: str, title_or_error: str, w=worker, it=target) -> None:
+            self._title_workers.discard(w)
+            try:
+                w.deleteLater()
+            except RuntimeError:
+                pass
+            if ok and title_or_error and not getattr(it, "title", ""):
+                it.title = title_or_error
+                self.queue_changed.emit()
+            QTimer.singleShot(150, lambda: self._fetch_title_chain(rest))
+
+        worker.validated.connect(done)
+        worker.finished.connect(
+            lambda *_, w=worker: self._title_workers.discard(w)
+        )
+        worker.validate(target.url)
 
     def _retry_later(self, item: DownloadItem) -> None:
         """Schedule a retry of *item* after exponential backoff."""

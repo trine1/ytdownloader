@@ -79,10 +79,14 @@ python -m yt_downloader
   item — running (live progress bar, ETA, pause/resume), paused, queued,
   awaiting-retry, completed (green ✓) and failed (red ✗). Each item is a row
   with its own progress bar (0–100%), an ETA/status text, pause/resume
-  controls and an ✕ remove button. Fully downloaded and failed items appear
-  greyed out (progress/controls disabled) but stay listed until removed with
-  their ✕. Completed downloads are *not* restored on startup (they show only
-  in the session that downloaded them).
+  controls and an ✕ remove button. Rows show the **video title**, not the
+  URL (the URL stays available as the row tooltip); titles come from the
+  validation step when you add the download, or are picked up from yt-dlp
+  once it starts running — items restored from saved state get their titles
+  resolved automatically in the background. Fully downloaded and failed items
+  appear greyed out (progress/controls disabled) but stay listed until
+  removed with their ✕. Completed downloads are *not* restored on startup
+  (they show only in the session that downloaded them).
 - **✕ remove button** next to every queued, active, and completed entry, so
   any item can be dropped from any list at any time.
 - **Automatic state save**: settings, the queue, and active downloads are

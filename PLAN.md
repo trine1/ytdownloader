@@ -258,3 +258,37 @@ Added to PLAN.md (Basic requirements + Features):
   label/input share one row (same y), tick message exact, no url_input key in
   freshly saved state.
 - Released as v0.3.4 (deb + generic installer + SHA256SUMS).
+
+### v0.3.5 — rows show titles; fix disappearing rows/controls on resume (2026-10-25)
+- **Root cause (fixed)**: resuming/pausing/removing from a row runnable
+  manager calls that emit `queue_changed` synchronously *inside the row's
+  click slot*; `_refresh_downloads()` then `clear()`ed the list, destroying
+  the very widget whose slot was still executing. The slot's next access to
+  `self` raised (RuntimeError "wrapped C/C++ object deleted", swallowed by
+  Qt) — the row could be left blank or stale ("controls sometimes
+  disappear"). Fix: row slots schedule the manager mutation via
+  `QTimer.singleShot(0, …)` and never touch `self` afterwards; the paused
+  RUNNING branch of `pause_item` now also emits `queue_changed` (it
+  previously relied on the deleted in-slot `apply_state`); `_on_item_started`
+  applies state to the existing row instead of a full rebuild when possible.
+- **Titles instead of URLs**: `DownloadItem.title` (default "", persisted in
+  state). Sources: validated input title at add-time, yt-dlp destination
+  filename once a download starts (emitted via new `Worker.resolved_title`),
+  and a background chain (`manager.resolve_missing_titles`, serialised,
+  one yt-dlp print per restored item) for state-restored items lacking one.
+  Rows display the title; URL moved to the tooltip; captions for
+  completed/failed/retrying states use the title too.
+- **Also fixed**: a validation-call hang — `_run_validation` used
+  `stderr=subprocess.PIPE` without draining it, so verbose yt-dlp stderr
+  (429 retry logs) filled the OS pipe buffer and blocked everything
+  (background title chain stalls). Now merged into stdout, plus
+  `--socket-timeout 15`, and the id/title print split into two lines parsed
+  by prefix (titles containing `|` or `:` no longer corrupt parsing).
+- Tested: widget-lifecycle toggles (resume→running→pause limbo→resume,
+  pending-paused branch, double-toggle, deferred ✕ removal on running and
+  queued rows — no vanished labels/controls), title render in all five row
+  states, title state round-trip, and a real end-to-end legacy restore:
+  paused item restored without a title → chain resolves "Me at the zoo" in
+  the background → row relabels → resume → completes greyed Done/100% with
+  file on disk.
+- Released as v0.3.5 (deb + generic installer + SHA256SUMS).

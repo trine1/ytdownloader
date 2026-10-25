@@ -117,7 +117,8 @@ class _DownloadRow(QWidget):
     def _caption(self) -> str:
         item = self.item
         state = self._state()
-        url = item.url
+        # Human-friendly title when we know it; URL only as fallback.
+        display = getattr(item, "title", "") or item.url
         broken = "; ".join(
             segment for segment in (
                 " [Paused]" if state in ("paused",) else "",
@@ -128,11 +129,11 @@ class _DownloadRow(QWidget):
         if state == "completed":
             dest = getattr(item, "destination", "")
             tail = f" → {os.path.basename(dest)}" if dest else ""
-            return f"✓ Completed: [{item.kind}] {url}{tail}"
+            return f"✓ Completed: [{item.kind}] {display}{tail}"
         if state == "failed":
             msg = getattr(item, "fail_message", "") or "download failed"
-            return f"✗ FAILED: [{item.kind}] {url} — {msg}"
-        return f"[{item.kind}] {url}{broken}"
+            return f"✗ FAILED: [{item.kind}] {display} — {msg}"
+        return f"[{item.kind}] {display}{broken}"
 
     def setSizeHint(self, *_a) -> None:  # noqa: N802 - mirrors Qt naming
         self._item_height = max(_ROW_MIN_HEIGHT, self.sizeHint().height())
@@ -204,17 +205,19 @@ class _DownloadRow(QWidget):
 
     # ---- actions ---------------------------------------------------------
     def _on_toggle_pause(self) -> None:
-        if self.item.paused:
-            self.manager.resume_item(self.item)
+        """Defer manager mutation: emitting queue_changed rebuilds the list,
+        which would destroy *this* widget while its own slot is running."""
+        item = self.item
+        if item.paused:
+            QTimer.singleShot(0, lambda: self.manager.resume_item(item))
         else:
-            self.manager.pause_item(self.item)
-        self.apply_state()
+            QTimer.singleShot(0, lambda: self.manager.pause_item(item))
+        # Do NOT touch self from here on — the timer may rebuild the list.
 
     def _on_remove(self) -> None:
-        window = self.window()
-        remove = getattr(window, "_remove_item", None)
-        if remove:
-            remove(self.item)
+        item = self.item
+        window = self.window()   # resolved before deferral
+        QTimer.singleShot(0, lambda: window._remove_item(item))
 
 
 class MainWindow(QMainWindow):
@@ -506,12 +509,12 @@ class MainWindow(QMainWindow):
         return self.downloads_list.itemWidget(li)
 
     def _on_item_started(self, item: DownloadItem) -> None:
-        # Rows appear via _refresh_downloads on queue_changed; make sure a
-        # just-started item's row reflects the running state immediately.
-        self._refresh_downloads()
+        # Prefer touching just this row; rebuild only if it isn't on screen.
         widget = self._row_widget(item)
         if isinstance(widget, _DownloadRow):
             widget.apply_state()
+        else:
+            self._refresh_downloads()
         self.status_label.setText(f"Downloading: {item.url}")
 
     def _on_item_progress(self, item: DownloadItem, percent: int, eta_seconds: int) -> None:

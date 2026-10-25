@@ -38,6 +38,7 @@ def _item_to_dict(item: DownloadItem) -> dict[str, Any]:
         "max_backoff": item.max_backoff,
         "paused": item.paused,
         "resume": item.resume,
+        "title": item.title,
     }
 
 
@@ -53,6 +54,7 @@ def _item_from_dict(data: dict[str, Any]) -> DownloadItem:
         max_backoff=data.get("max_backoff", 300),
         paused=data.get("paused", False),
         resume=data.get("resume", False),
+        title=data.get("title", ""),
     )
 
 

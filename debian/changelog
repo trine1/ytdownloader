@@ -1,3 +1,17 @@
+ytdownloader (0.3.5-1) bookworm; urgency=medium
+
+  * Downloads rows now show the human-friendly video title instead of the
+    URL (the URL moves into the row tooltip). Titles come from the validated
+    input, or from yt-dlp output once a download starts.
+  * Items restored from state without a title get one in the background
+    (one lightweight yt-dlp lookup per item, serialised).
+  * Fixed rows/controls sometimes disappearing when resuming, pausing or
+    removing items: row list rebuilds are now deferred out of the click
+    handler so a widget is never destroyed while its own slot is running;
+    pause-from-row triggers the list refresh reliably.
+
+ -- User <user@example.com>  Mon, 26 Oct 2026 00:30:00 +0000
+
 ytdownloader (0.3.4-1) bookworm; urgency=medium
 
   * "Source" label now sits on the same row as the URL input field.
