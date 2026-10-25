@@ -328,16 +328,6 @@ class MainWindow(QMainWindow):
         self.download_btn.setToolTip("Start this download immediately")
         actions.addWidget(self.download_btn)
         actions.addStretch(1)
-        self.pause_all_btn = QPushButton("Pause downloads")
-        self.pause_all_btn.setFixedWidth(150)
-        self.pause_all_btn.setToolTip(
-            "Pause every active and pending download (survives restart)"
-        )
-        actions.addWidget(self.pause_all_btn)
-        self.clear_btn = QPushButton("Clear downloaded")
-        self.clear_btn.setFixedWidth(150)
-        self.clear_btn.setToolTip("Remove completed and failed items from the list")
-        actions.addWidget(self.clear_btn)
         layout.addLayout(actions)
         layout.addSpacing(14)   # breathing room above the Downloads heading
 
@@ -348,7 +338,22 @@ class MainWindow(QMainWindow):
         self.downloads_list.setMinimumHeight(300)
         downloads_layout.addWidget(self.downloads_list)
         layout.addWidget(downloads)
-        layout.addStretch(0)
+
+        # ---- Downloads controls (right-aligned, under the section) ---------
+        dl_controls = QHBoxLayout()
+        dl_controls.addStretch(1)
+        self.pause_all_btn = QPushButton("Pause downloads")
+        self.pause_all_btn.setFixedWidth(150)
+        self.pause_all_btn.setToolTip(
+            "Pause every active and pending download (survives restart)"
+        )
+        dl_controls.addWidget(self.pause_all_btn)
+        self.clear_btn = QPushButton("Clear downloaded")
+        self.clear_btn.setFixedWidth(150)
+        self.clear_btn.setToolTip("Remove completed and failed items from the list")
+        dl_controls.addWidget(self.clear_btn)
+        layout.addLayout(dl_controls)
+        layout.addSpacing(6)
 
         self.status_label = QLabel("Ready")
         self.status_label.setStyleSheet("color: #333;")

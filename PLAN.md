@@ -235,3 +235,11 @@ Added to PLAN.md (Basic requirements + Features):
   record. Note: the vision review subagent was unavailable this session, so
   visual confirmation relied on the geometry assertions above.
 - Released as v0.3.2 (deb + generic installer + SHA256SUMS).
+
+### v0.3.3 — controls moved under the Downloads section (2026-10-25)
+- "Pause downloads" and "Clear downloaded" now sit in a right-aligned row
+  directly underneath the Downloads list frame (before the status line); the
+  top row holds only the Download button. Geometry-verified in the offscreen
+  GUI: buttons at y=549 below the frame bottom y=542, right-aligned
+  (x=585/741), status label beneath.
+- Released as v0.3.3 (deb + generic installer + SHA256SUMS).

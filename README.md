@@ -54,10 +54,10 @@ python -m yt_downloader
   verify it is the file you want.
 - **Explicit start only**: nothing downloads until you press **Download**
   (starts immediately, ahead of items already waiting).
-- **Pause downloads / Clear downloaded** sit on the right of the button row:
-  pause pauses every active and pending item at once (persists across
-  restart); clear removes only completed/failed items — per-row ✕ removes
-  anything else individually.
+- **Pause downloads / Clear downloaded** sit underneath the Downloads list
+  (right-aligned): pause pauses every active and pending item at once
+  (persists across restart); clear removes only completed/failed items —
+  per-row ✕ removes anything else individually.
 - **Audio only (best quality)** or **video + audio (highest resolution,
   merged with ffmpeg)**.
 - **Queueing with parallel downloads**: up to N concurrent downloads (N set in
