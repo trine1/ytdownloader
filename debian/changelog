@@ -1,3 +1,11 @@
+ytdownloader (0.3.1-1) bookworm; urgency=medium
+
+  * UI polish: removed the "Source" and "Options" section headings; the URL
+    field and Format/Output controls now sit directly in the window, leaving
+    the single merged "Downloads" section as the only framed group.
+
+ -- User <user@example.com>  Sun, 25 Oct 2026 19:30:00 +0000
+
 ytdownloader (0.3.0-1) bookworm; urgency=medium
 
   * Single merged Downloads list: running, paused, pending, retrying,

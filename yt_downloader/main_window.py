@@ -287,9 +287,9 @@ class MainWindow(QMainWindow):
         version_action.setStatusTip("Show the current version of this tool")
         version_action.triggered.connect(self._show_version)
 
-        # ---- Source -------------------------------------------------------
-        src = QGroupBox("Source")
-        src_layout = QVBoxLayout(src)
+        # ---- Source (no heading) ------------------------------------------
+        src_layout = QVBoxLayout()
+        src_layout.setContentsMargins(0, 0, 0, 0)
         self.url_input = QLineEdit()
         self.url_input.setPlaceholderText(
             "YouTube URL or video ID (e.g. dQw4w9WgXcQ); invidious URLs accepted"
@@ -299,11 +299,10 @@ class MainWindow(QMainWindow):
         self.validation_label.setWordWrap(True)
         src_layout.addWidget(self.url_input)
         src_layout.addWidget(self.validation_label)
-        layout.addWidget(src)
+        layout.addLayout(src_layout)
 
-        # ---- Options ------------------------------------------------------
-        opt = QGroupBox("Options")
-        opt_layout = QHBoxLayout(opt)
+        # ---- Options (no heading) -----------------------------------------
+        opt_layout = QHBoxLayout()
 
         self.format_combo = QComboBox()
         self.format_combo.addItem("Audio only (best quality)", "audio")
@@ -319,7 +318,7 @@ class MainWindow(QMainWindow):
         opt_layout.addWidget(QLabel("Output:"))
         opt_layout.addWidget(self.output_input, stretch=1)
         opt_layout.addWidget(self.browse_btn)
-        layout.addWidget(opt)
+        layout.addLayout(opt_layout)
 
         # ---- Actions ------------------------------------------------------
         actions = QHBoxLayout()

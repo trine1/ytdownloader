@@ -210,3 +210,11 @@ Added to PLAN.md (Basic requirements + Features):
   real end-to-end yt-dlp download (pause mid-run at attempt boundary, resume
   with `-c`, completion, file on disk, row greyed with destination name).
 - Released as v0.3.0 (deb + generic installer + SHA256SUMS).
+
+### v0.3.1 — UI polish (2026-10-25)
+- Removed the "Source" and "Options" framed group boxes; the URL field and
+  validation label, and the Format/Output row, now sit directly in the window
+  content. The single merged "Downloads" section remains the only framed
+  group. Verified by widget-tree introspection (only "Downloads" group box
+  remains; Settings dialog group boxes untouched).
+- Released as v0.3.1 (deb + generic installer + SHA256SUMS).
