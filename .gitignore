@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Build artifacts (regenerated with build_deb.py / dpkg-buildpackage)
+*.deb
+debian/.debhelper/
+debian/ytdownloader/
+debian/files
+debian/debhelper-build-stamp
+build/
+dist/
+
+# Editors / OS
+*.swp
+.DS_Store

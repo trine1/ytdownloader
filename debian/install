@@ -1,0 +1,3 @@
+usr/bin/ytdownloader
+usr/lib/python3/dist-packages/yt_downloader/*.py
+usr/share/applications/ytdownloader.desktop

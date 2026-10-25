@@ -1,0 +1,22 @@
+ytdownloader (0.2.0-1) bookworm; urgency=medium
+
+  * Invidious-style URLs accepted (inv.nadeko.net, invidious.tiekoetter.com, ...).
+  * Full title shown on validation; downloads start only via explicit
+    "Download now" / "Add to queue" buttons.
+  * Completed downloads shown; not restored on startup.
+  * Remove (✕) buttons on queued, active, and completed rows.
+  * Pause all button; paused state persists across restarts.
+  * Quit dialog notes auto-resume on next start; Shift+Ctrl+Q exits without prompting.
+  * Help menu shows version.
+  * Automatic state save (periodic + on exit) with restore on startup.
+
+ -- User <user@example.com>  Sun, 25 Oct 2026 12:00:00 +0000
+
+ytdownloader (0.1.0-1) bookworm; urgency=medium
+
+  * Initial release for Linux Mint LMDE 7 (Debian 12 bookworm).
+  * Qt graphical YouTube audio/video downloader using yt-dlp.
+  * Features: validation, queuing, parallel downloads, auto-retry with
+    exponential backoff, completion verification, progress reporting.
+
+ -- User <user@example.com>  Sun, 25 Oct 2026 10:00:00 +0000

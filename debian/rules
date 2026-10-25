@@ -1,0 +1,13 @@
+#!/usr/bin/make -f
+
+%:
+	dh $@
+
+override_dh_auto_install:
+	dh_auto_install
+	install -m 0755 -d debian/ytdownloader/usr/bin
+	install -m 0755 yt_downloader/launcher.sh debian/ytdownloader/usr/bin/ytdownloader
+	install -m 0755 -d debian/ytdownloader/usr/lib/python3/dist-packages/yt_downloader
+	install -m 0644 yt_downloader/*.py debian/ytdownloader/usr/lib/python3/dist-packages/yt_downloader/
+	install -m 0755 -d debian/ytdownloader/usr/share/applications
+	install -m 0644 yt_downloader.desktop debian/ytdownloader/usr/share/applications/

@@ -1,0 +1,21 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ytdownloader"
+version = "0.2.0"
+description = "Qt graphical YouTube audio/video downloader using yt-dlp"
+requires-python = ">=3.10"
+dependencies = [
+    "PyQt6>=6.6",
+]
+
+[project.scripts]
+ytdownloader = "yt_downloader.main:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["yt_downloader"]
+
+[tool.uv]
+sources = {}

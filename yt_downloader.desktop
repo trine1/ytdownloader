@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=YouTube Downloader
+GenericName=YouTube Audio/Video Downloader
+Comment=Download YouTube audio or video in the highest resolution using yt-dlp
+Exec=ytdownloader
+Icon=media-download
+Terminal=false
+Type=Application
+Categories=AudioVideo;AudioVideoEditing;Network;
+Keywords=youtube;yt-dlp;download;audio;video;
+MimeType=x-scheme-handler/youtube;

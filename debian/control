@@ -1,0 +1,18 @@
+Source: ytdownloader
+Section: net
+Priority: optional
+Maintainer: User <user@example.com>
+Build-Depends: debhelper (>= 10), python3-all
+Standards-Version: 4.5.0
+
+Package: ytdownloader
+Architecture: amd64
+Depends: python3-pyqt6, yt-dlp, ffmpeg, ${misc:Depends}, ${python3:Depends}
+Description: YouTube audio/video downloader with Qt GUI
+ A Linux graphical tool for downloading YouTube files as audio or
+ audio/video in the highest supported resolution, using yt-dlp.
+ The interface accepts complete YouTube URLs or unique video IDs
+ (the v= parameter). Features immediate validation, a download queue,
+ progress bar with percent complete and ETA, auto-retry with
+ exponential backoff (configurable), parallel downloads (configurable),
+ and robust completion verification.
