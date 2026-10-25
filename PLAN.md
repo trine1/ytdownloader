@@ -181,3 +181,32 @@ Added to PLAN.md (Basic requirements + Features):
   - `ytdownloader_0.2.0_amd64.deb` (Debian/LMDE 7)
   - `ytdownloader-0.2.0-linux-installer.sh` (any distro)
   - `SHA256SUMS.txt` (sha256 checksums)
+
+### v0.3.0 — merged Downloads list + two UI bugs fixed (2026-10-25)
+- **Bug (fixed)**: a completed download previously vanished — it was removed
+  from Active rows via `item_finished`, but the completed list only refreshed
+  on `queue_changed`, which the manager did not emit on terminal states, and
+  `item_completed` was never connected in the window. Now: the manager emits
+  `queue_changed` on both terminal paths (success ⇒ `_completed`, exhausted
+  failure ⇒ new `_failed` list) and the window connects both signals;
+  terminal rows stay listed, greyed out.
+- **Bug (fixed)**: active rows could show only the label (URL + kind) with the
+  progress bar/ETA/buttons invisible for long URLs: the label's width hint
+  (long URL) inflated the item's size hint beyond the viewport, so the row
+  widget was clipped on the right. The label now uses
+  `QSizePolicy.Ignored` horizontally (URL in the row tooltip) and every row
+  enforces a minimum height.
+- **Merged "Downloads" section** replaces Queue / Active / Completed: one
+  list, ordered running → paused → queued → retrying → completed → failed.
+  Every row: progress bar 0–100%, ETA/status text, pause/resume (greyed "Done"
+  / "Stopped" for terminal states) and ✕ removal. Pending rows pause too;
+  manager gained queued-item pause, `_failed` list, `display_items()` ordering
+  with identity-based de-duplication.
+- Thorough testing: manager unit tests (ordering, dedup, pending pause,
+  retry-list pause/removal, failed removal), GUI lifecycle test (live progress
+  ticks, pause-all/resume-all row states, completion -> greyed 100% row in the
+  merged list, failed row keeps last %), offscreen screenshots reviewed
+  (running 75% + queued + paused; completed ✓ greyed + failed ✗ greyed), and a
+  real end-to-end yt-dlp download (pause mid-run at attempt boundary, resume
+  with `-c`, completion, file on disk, row greyed with destination name).
+- Released as v0.3.0 (deb + generic installer + SHA256SUMS).

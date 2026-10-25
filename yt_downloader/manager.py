@@ -49,6 +49,7 @@ class DownloadManager(QObject):
         # Failed items awaiting a scheduled retry (no worker yet).
         self._scheduled_retries: List[DownloadItem] = []
         self._completed: List[DownloadItem] = []
+        self._failed: List[DownloadItem] = []
         self._validation_workers: set = set()
         self._paused_workers: set = set()   # workers stopped by user pause
         self._cancelled_workers: set = set()  # workers stopped for removal
@@ -127,6 +128,7 @@ class DownloadManager(QObject):
         self._paused_items.clear()
         self._scheduled_retries.clear()
         self._completed.clear()
+        self._failed.clear()
         self.queue_changed.emit()
         # Re-enable launching shortly after stopped workers settle, so a fresh
         # session (or post-clear adds) can start downloading again.
@@ -151,6 +153,36 @@ class DownloadManager(QObject):
     def completed_items(self) -> List[DownloadItem]:
         return list(self._completed)
 
+    def failed_items(self) -> List[DownloadItem]:
+        return list(self._failed)
+
+    def closed_items(self) -> List[DownloadItem]:
+        """Finished downloads (successful first, then failed)."""
+        return list(self._completed) + list(self._failed)
+
+    def is_retry_scheduled(self, item: DownloadItem) -> bool:
+        return item in self._scheduled_retries
+
+    def display_items(self) -> List[DownloadItem]:
+        """Every item the Downloads list should show, in display order.
+
+        Order: running, paused (limbo), queued,.awaiting-retry, completed,
+        failed. Duplicates (a paused item briefly still in _active, etc.) are
+        de-duplicated by identity.
+        """
+        result: List[DownloadItem] = []
+        for it in (
+            list(self._active.values())
+            + list(self._paused_items)
+            + list(self._queue)
+            + list(self._scheduled_retries)
+            + list(self._completed)
+            + list(self._failed)
+        ):
+            if all(it is not other for other in result):
+                result.append(it)
+        return result
+
     def remove_active(self, item: DownloadItem) -> bool:
         """Stop and remove an active (or paused) download. True if removed."""
         for worker, it in list(self._active.items()):
@@ -169,12 +201,21 @@ class DownloadManager(QObject):
             self.item_status.emit(item, "Removed by user")
             self.queue_changed.emit()
             return True
+        if item in self._scheduled_retries:
+            self._scheduled_retries.remove(item)
+            self.item_status.emit(item, "Removed by user")
+            self.queue_changed.emit()
+            return True
         return False
 
     def remove_completed(self, item: DownloadItem) -> bool:
-        """Remove a completed download from the completed list."""
+        """Remove a finished (completed or failed) download from the list."""
         if item in self._completed:
             self._completed.remove(item)
+            self.queue_changed.emit()
+            return True
+        if item in self._failed:
+            self._failed.remove(item)
             self.queue_changed.emit()
             return True
         return False
@@ -187,10 +228,11 @@ class DownloadManager(QObject):
 
     # ---- pause / resume --------------------------------------------------
     def pause_item(self, item: DownloadItem) -> None:
-        """Pause an active download by stopping its yt-dlp worker.
+        """Pause a download (running, retry-scheduled, or pending).
 
-        The item is *not* treated as failed. It moves to the paused set and
-        remembers ``resume`` so a later resume continues the partial file.
+        An active worker is stopped; the item moves to the paused set so a
+        later resume continues the partial file. Pending items are simply
+        flagged ``paused`` (they stay queued and keep their order).
         """
         for worker, it in list(self._active.items()):
             if it is item:
@@ -202,9 +244,18 @@ class DownloadManager(QObject):
                 worker.stop()
                 self.item_status.emit(item, "Paused")
                 return
+        if item in self._scheduled_retries:
+            item.paused = True
+            self.queue_changed.emit()
+            self.item_status.emit(item, "Paused")
+            return
+        if item in self._queue:
+            item.paused = True
+            self.queue_changed.emit()
+            self.item_status.emit(item, "Paused")
 
     def resume_item(self, item: DownloadItem) -> None:
-        """Resume a paused download by re-queueing it with --continue."""
+        """Resume a paused or stopped download by re-queueing it."""
         item.paused = False
         item.resume = True
         if item in self._paused_items:
@@ -436,9 +487,10 @@ class DownloadManager(QObject):
 
         if success:
             self.item_finished.emit(item, True, message, destination or "")
-            # Track as completed so the UI can show finished downloads.
+            # Track as completed so the Downloads list shows it (greyed out).
             self._completed.append(item)
             self.item_completed.emit(item, destination or "")
+            self.queue_changed.emit()
             # Slot freed; start more queued items.
             QTimer.singleShot(0, self._start_next)
         elif item.attempts < item.max_attempts:
@@ -446,4 +498,7 @@ class DownloadManager(QObject):
             self._retry_later(item)
         else:
             self.item_finished.emit(item, False, message, destination or "")
+            # Terminal failure: keep it visible in the Downloads list, greyed out.
+            self._failed.append(item)
+            self.queue_changed.emit()
             QTimer.singleShot(0, self._start_next)

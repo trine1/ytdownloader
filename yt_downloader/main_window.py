@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import os
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 
-from PyQt6.QtCore import QTimer
+from PyQt6.QtCore import QSize, QTimer
 from PyQt6.QtWidgets import (
     QComboBox,
     QFileDialog,
@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -32,6 +33,8 @@ from .worker import DownloadItem, format_seconds
 APP_TITLE = "YouTube Downloader"
 DEFAULT_OUTPUT_DIR = os.path.expanduser("~/Downloads")
 
+_ROW_MIN_HEIGHT = 38
+
 
 class _XButton(QPushButton):
     """Small ✕ remove button."""
@@ -43,102 +46,173 @@ class _XButton(QPushButton):
         self.clicked.connect(on_click)
 
 
-class _ActiveRow(QWidget):
-    """A single row shown in the active-downloads list."""
+class _DownloadRow(QWidget):
+    """One row in the Downloads list — used for every state of an item.
+
+    Running items show a live progress bar, ETA, pause/resume and ✕.
+    Pending items show 0% and (pause + ✕) so they can be paused/removed
+    before they start. Paused and awaiting-retry items show their last
+    progress with Resume available. Completed/failed items are greyed out:
+    progress bar disabled (100% green ✓), pause/resume disabled, ✕ removes.
+    """
 
     def __init__(self, item: DownloadItem, manager: DownloadManager, parent=None) -> None:
         super().__init__(parent)
         self.item = item
         self.manager = manager
+        self.setMinimumHeight(_ROW_MIN_HEIGHT)
+
         self._label = QLabel()
+        self._label.setWordWrap(False)
+        # 'Ignored' keeps the row's width hint independent of URL length, so a
+        # long URL can never widen the item past the viewport and clip the
+        # progress bar / buttons out of view.
+        self._label.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
+        )
+
         self._progress = QProgressBar()
         self._progress.setRange(0, 100)
-        self._progress.setValue(0)
-        self._progress.setFixedWidth(110)
-        self._eta = QLabel("ETA: --:--")
-        self.pause_btn = QPushButton("Pause")
-        self.pause_btn.setFixedWidth(70)
-        self.pause_btn.clicked.connect(self._on_toggle_pause)
-        self.remove_btn = _XButton(self._on_remove)
+        self._progress.setFixedWidth(130)
+
+        self._eta = QLabel("")
+        self._eta.setFixedWidth(88)
+
+        self._pause_btn = QPushButton()
+        self._pause_btn.setFixedWidth(76)
+        self._pause_btn.clicked.connect(self._on_toggle_pause)
+
+        self._remove_btn = _XButton(self._on_remove)
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(4, 2, 4, 2)
         layout.addWidget(self._label, stretch=1)
         layout.addWidget(self._progress)
         layout.addWidget(self._eta)
-        layout.addWidget(self.pause_btn)
-        layout.addWidget(self.remove_btn)
-        self._refresh_label()
+        layout.addWidget(self._pause_btn)
+        layout.addWidget(self._remove_btn)
+        self.setSizeHint()
+        self.apply_state()
 
-    def _refresh_label(self) -> None:
-        state = " [Paused]" if self.item.paused else ""
-        self._label.setText(f"[{self.item.kind}] {self.item.url}{state}")
+    # ---- helpers ---------------------------------------------------------
+    def _terminal_state(self) -> Optional[str]:
+        if self.item in self.manager.completed_items():
+            return "completed"
+        if self.item in self.manager.failed_items():
+            return "failed"
+        return None
 
+    def _state(self) -> str:
+        terminal = self._terminal_state()
+        if terminal:
+            return terminal
+        if self.item.paused:
+            return "paused"
+        if self.item in self.manager.active_items():
+            return "running"
+        if self.manager.is_retry_scheduled(self.item):
+            return "retrying"
+        return "pending"
+
+    def _caption(self) -> str:
+        item = self.item
+        state = self._state()
+        url = item.url
+        broken = "; ".join(
+            segment for segment in (
+                " [Paused]" if state in ("paused",) else "",
+                f" — retrying (attempt {item.attempts}/{item.max_attempts})"
+                if state == "retrying" else "",
+            ) if segment
+        )
+        if state == "completed":
+            dest = getattr(item, "destination", "")
+            tail = f" → {os.path.basename(dest)}" if dest else ""
+            return f"✓ Completed: [{item.kind}] {url}{tail}"
+        if state == "failed":
+            msg = getattr(item, "fail_message", "") or "download failed"
+            return f"✗ FAILED: [{item.kind}] {url} — {msg}"
+        return f"[{item.kind}] {url}{broken}"
+
+    def setSizeHint(self, *_a) -> None:  # noqa: N802 - mirrors Qt naming
+        self._item_height = max(_ROW_MIN_HEIGHT, self.sizeHint().height())
+
+    def apply_state(self) -> None:
+        item = self.item
+        state = self._state()
+
+        self._label.setText(self._caption())
+        self._label.setToolTip(f"{item.url}\n{self._caption()}")
+
+        last_pct = getattr(item, "last_pct", None)
+        last_eta = getattr(item, "last_eta", None)
+
+        if state == "completed":
+            self._progress.setValue(100)
+            self._progress.setEnabled(False)
+            self._eta.setText("✓")
+            self._pause_btn.setText("Done")
+            self._pause_btn.setEnabled(False)
+            self._label.setStyleSheet("color: #0a0;")
+        elif state == "failed":
+            self._progress.setValue(last_pct if last_pct is not None else 0)
+            self._progress.setEnabled(False)
+            self._eta.setText("✗")
+            self._pause_btn.setText("Stopped")
+            self._pause_btn.setEnabled(False)
+            self._label.setStyleSheet("color: #a00;")
+        elif state == "paused":
+            self._progress.setEnabled(True)
+            self._pause_btn.setText("Resume")
+            self._pause_btn.setEnabled(True)
+            if last_pct is not None:
+                self._progress.setValue(last_pct)
+            self._eta.setText("Paused")
+            self._label.setStyleSheet("color: #b60; font-weight: normal;")
+        elif state == "retrying":
+            self._progress.setEnabled(True)
+            self._pause_btn.setText("Pause")
+            self._pause_btn.setEnabled(True)
+            if last_pct is not None:
+                self._progress.setValue(last_pct)
+            self._eta.setText("Retry…")
+            self._label.setStyleSheet("color: #b60;")
+        elif state == "running":
+            self._progress.setEnabled(True)
+            self._pause_btn.setText("Pause")
+            self._pause_btn.setEnabled(True)
+            self._progress.setValue(last_pct if last_pct is not None else 0)
+            self._eta.setText(
+                f"ETA: {format_seconds(last_eta)}" if last_eta is not None else "ETA: --:--"
+            )
+            self._label.setStyleSheet("")
+        else:  # pending
+            self._progress.setEnabled(True)
+            self._pause_btn.setText("Pause")
+            self._pause_btn.setEnabled(True)
+            self._progress.setValue(0)
+            self._eta.setText("Queued")
+            self._label.setStyleSheet("color: #333;")
+        self.setSizeHint()
+
+    def update_progress(self, percent: int, eta_seconds: int) -> None:
+        setattr(self.item, "last_pct", percent)
+        setattr(self.item, "last_eta", eta_seconds)
+        if self._pause_btn.isEnabled():
+            self._eta.setText(f"ETA: {format_seconds(eta_seconds)}")
+        self._progress.setValue(percent)
+
+    # ---- actions ---------------------------------------------------------
     def _on_toggle_pause(self) -> None:
         if self.item.paused:
             self.manager.resume_item(self.item)
-            self.pause_btn.setText("Pause")
         else:
             self.manager.pause_item(self.item)
-            self.pause_btn.setText("Resume")
-        self._refresh_label()
+        self.apply_state()
 
     def _on_remove(self) -> None:
-        self.manager.remove_active(self.item)
-
-    def set_paused(self, paused: bool) -> None:
-        self.item.paused = paused
-        self.pause_btn.setText("Resume" if paused else "Pause")
-        self._refresh_label()
-
-    def update_progress(self, percent: int, eta_seconds: int) -> None:
-        self._progress.setValue(percent)
-        self._eta.setText(f"ETA: {format_seconds(eta_seconds)}")
-
-
-class _QueueRow(QWidget):
-    """A single row shown in the waiting-queue list, with a remove button."""
-
-    def __init__(self, item: DownloadItem, parent=None) -> None:
-        super().__init__(parent)
-        self.item = item
-        paused = " [Paused]" if item.paused else ""
-        retry = f" — retrying (attempt {item.attempts}/{item.max_attempts})" if item.attempts else ""
-        self._label = QLabel(f"[{item.kind}] {item.url}{paused}{retry}")
-        self.remove_btn = _XButton(self._on_remove)
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(4, 2, 4, 2)
-        layout.addWidget(self._label, stretch=1)
-        layout.addWidget(self.remove_btn)
-
-    def _on_remove(self) -> None:
-        if self.parentWidget() is None:
-            return
         window = self.window()
-        remove = getattr(window, "_remove_queued_item", None)
-        if remove:
-            remove(self.item)
-
-
-class _CompletedRow(QWidget):
-    """A single row shown in the completed-downloads list, with a remove button."""
-
-    def __init__(self, item: DownloadItem, parent=None) -> None:
-        super().__init__(parent)
-        self.item = item
-        self._label = QLabel(f"✓ [{item.kind}] {item.url}")
-        self._label.setStyleSheet("color: #0a0;")
-        self.remove_btn = _XButton(self._on_remove)
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(4, 2, 4, 2)
-        layout.addWidget(self._label, stretch=1)
-        layout.addWidget(self.remove_btn)
-
-    def _on_remove(self) -> None:
-        if self.parentWidget() is None:
-            return
-        window = self.window()
-        remove = getattr(window, "_remove_completed_item", None)
+        remove = getattr(window, "_remove_item", None)
         if remove:
             remove(self.item)
 
@@ -147,9 +221,8 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle(f"{APP_TITLE} v{APP_VERSION}")
-        self.resize(860, 700)
+        self.resize(900, 640)
 
-        # Default settings (overridden by Settings dialog / saved state).
         self._settings = {
             "max_parallel": 1,
             "max_attempts": 10,
@@ -169,8 +242,8 @@ class MainWindow(QMainWindow):
             for k in ("max_parallel", "max_attempts", "initial_backoff", "max_backoff")
         })
 
-        # Maps active item -> QListWidgetItem row.
-        self._active_rows: Dict[DownloadItem, QListWidgetItem] = {}
+        # item -> row (list item) registry is rebuilt on queue changes.
+        self._row_registry: Dict[DownloadItem, QListWidgetItem] = {}
 
         self._build_ui()
         self._connect_signals()
@@ -186,7 +259,7 @@ class MainWindow(QMainWindow):
         self._validation_timer.setInterval(400)
         self._validation_timer.timeout.connect(self._run_validation)
 
-        # Load persisted state (settings, queue, active downloads).
+        # Load persisted state (settings, queued + paused/active downloads).
         self._load_state()
 
     # ------------------------------------------------------------------ UI
@@ -263,35 +336,19 @@ class MainWindow(QMainWindow):
         self.pause_all_btn.setToolTip("Pause every active and pending download (survives restart)")
         self.clear_btn = QPushButton("Clear list")
         self.clear_btn.setFixedWidth(90)
-        self.clear_btn.setToolTip("Remove everything from all lists")
+        self.clear_btn.setToolTip("Remove everything from the Downloads list")
         for b in (self.download_now_btn, self.add_queue_btn, self.pause_all_btn, self.clear_btn):
             actions.addWidget(b)
         actions.addStretch(1)
         layout.addLayout(actions)
 
-        # ---- Active downloads ---------------------------------------------
-        active = QGroupBox("Active downloads")
-        active_layout = QVBoxLayout(active)
-        self.active_list = QListWidget()
-        self.active_list.setFixedHeight(105)
-        active_layout.addWidget(self.active_list)
-        layout.addWidget(active)
-
-        # ---- Queue --------------------------------------------------------
-        queue = QGroupBox("Queue (waiting to download)")
-        queue_layout = QVBoxLayout(queue)
-        self.queue_list = QListWidget()
-        self.queue_list.setFixedHeight(100)
-        queue_layout.addWidget(self.queue_list)
-        layout.addWidget(queue)
-
-        # ---- Completed ----------------------------------------------------
-        completed = QGroupBox("Completed downloads")
-        completed_layout = QVBoxLayout(completed)
-        self.completed_list = QListWidget()
-        self.completed_list.setFixedHeight(90)
-        completed_layout.addWidget(self.completed_list)
-        layout.addWidget(completed)
+        # ---- Downloads (single merged section) -----------------------------
+        downloads = QGroupBox("Downloads")
+        downloads_layout = QVBoxLayout(downloads)
+        self.downloads_list = QListWidget()
+        self.downloads_list.setMinimumHeight(300)
+        downloads_layout.addWidget(self.downloads_list)
+        layout.addWidget(downloads)
 
         self.status_label = QLabel("Ready")
         self.status_label.setStyleSheet("color: #333;")
@@ -306,13 +363,16 @@ class MainWindow(QMainWindow):
         self.pause_all_btn.clicked.connect(self._on_pause_all)
         self.clear_btn.clicked.connect(self._on_clear_clicked)
 
-        # Manager signals.
         self._manager.item_validated.connect(self._on_validated)
         self._manager.item_started.connect(self._on_item_started)
         self._manager.item_progress.connect(self._on_item_progress)
         self._manager.item_status.connect(self._on_item_status)
         self._manager.item_finished.connect(self._on_item_finished)
-        self._manager.queue_changed.connect(self._refresh_lists)
+        self._manager.item_completed.connect(self._on_item_completed)
+        # Rebuild the merged Downloads list whenever the item set changes —
+        # including on completion / terminal failure (queue_changed is emitted
+        # by the manager there).
+        self._manager.queue_changed.connect(self._refresh_downloads)
         # State persistence: save whenever the download set changes.
         self._manager.queue_changed.connect(self._save_state)
         self._manager.item_started.connect(self._save_state)
@@ -357,9 +417,7 @@ class MainWindow(QMainWindow):
         if ok:
             self._validated_url = resolved_url
             self._validated_title = title_or_error
-            self.validation_label.setText(
-                f"✓  Ready to download:  {title_or_error}"
-            )
+            self.validation_label.setText(f"✓  Ready to download:  {title_or_error}")
             self.validation_label.setStyleSheet("color: #0a0; font-size: 13px; font-weight: bold;")
         else:
             self._validated_url = None
@@ -367,7 +425,6 @@ class MainWindow(QMainWindow):
             self.validation_label.setText(f"✗  Invalid: {title_or_error}")
             self.validation_label.setStyleSheet("color: #a00; font-weight: bold;")
         enabled = bool(self.url_input.text().strip()) and ok
-        # Downloads never commence on validation — only via an explicit button.
         self.download_now_btn.setEnabled(enabled)
         self.add_queue_btn.setEnabled(enabled)
 
@@ -416,10 +473,8 @@ class MainWindow(QMainWindow):
     def _on_pause_all(self) -> None:
         if self._has_anything_paused():
             self._manager.resume_all()
-            self.pause_all_btn.setText("Pause all")
         else:
             self._manager.pause_all()
-            self.pause_all_btn.setText("Resume all")
         self._save_state()
 
     def _has_anything_paused(self) -> bool:
@@ -430,46 +485,82 @@ class MainWindow(QMainWindow):
 
     def _on_clear_clicked(self) -> None:
         self._manager.clear_queue()
-        self._active_rows.clear()
-        self.active_list.clear()
-        self.pause_all_btn.setText("Pause all")
         self.status_label.setText("Ready")
 
-    def _remove_queued_item(self, item: DownloadItem) -> None:
+    # ------------------------------------------------------------------ merged Downloads list
+    def _refresh_downloads(self) -> None:
+        """Rebuild the single Downloads list from the manager's items."""
+        self.downloads_list.clear()
+        self._row_registry.clear()
+        for item in self._manager.display_items():
+            row = _DownloadRow(item, self._manager)
+            li = QListWidgetItem()
+            li.setSizeHint(QSize(row.sizeHint().width(), row._item_height))
+            self.downloads_list.addItem(li)
+            self.downloads_list.setItemWidget(li, row)
+            self._row_registry[item] = li
+        if self._has_anything_paused():
+            self.pause_all_btn.setText("Resume all")
+        elif not self._manager._paused_items:
+            self.pause_all_btn.setText("Pause all")
+
+    def _row_widget(self, item: DownloadItem):
+        li = self._row_registry.get(item)
+        if li is None:
+            return None
+        return self.downloads_list.itemWidget(li)
+
+    def _on_item_started(self, item: DownloadItem) -> None:
+        # Rows appear via _refresh_downloads on queue_changed; make sure a
+        # just-started item's row reflects the running state immediately.
+        self._refresh_downloads()
+        widget = self._row_widget(item)
+        if isinstance(widget, _DownloadRow):
+            widget.apply_state()
+        self.status_label.setText(f"Downloading: {item.url}")
+
+    def _on_item_progress(self, item: DownloadItem, percent: int, eta_seconds: int) -> None:
+        setattr(item, "last_pct", percent)
+        setattr(item, "last_eta", eta_seconds)
+        widget = self._row_widget(item)
+        if isinstance(widget, _DownloadRow):
+            widget.update_progress(percent, eta_seconds)
+
+    def _on_item_status(self, item: DownloadItem, message: str) -> None:
+        self.status_label.setText(message)
+
+    def _on_item_finished(
+        self, item: DownloadItem, success: bool, message: str, destination: str
+    ) -> None:
+        if success:
+            setattr(item, "destination", destination or getattr(item, "destination", ""))
+            setattr(item, "last_pct", 100)
+            self.status_label.setText(
+                f"Finished: {item.url}" + (f" [saved to {destination}]" if destination else "")
+            )
+        else:
+            setattr(item, "fail_message", message)
+            self.status_label.setText(f"FAILED: {item.url} — {message}")
+        self._remove_row_entry(item)
+
+    def _on_item_completed(self, item: DownloadItem, destination: str) -> None:
+        # Rebuild so the item reappears greyed-out inside the merged list.
+        self._refresh_downloads()
+
+    def _remove_row_entry(self, item: DownloadItem) -> None:
+        self._row_registry.pop(item, None)
+
+    def _remove_item(self, item: DownloadItem) -> None:
+        """Route the ✕ press for whichever state the item is in."""
+        if item in self._manager.completed_items() or item in self._manager.failed_items():
+            self._manager.remove_completed(item)
+            return
         items = self._manager.queue_items()
         for i, it in enumerate(items):
             if it is item:
                 self._manager.remove_queued(i)
                 return
-        # Paused previously-active items may still live in the paused set.
         self._manager.remove_active(item)
-
-    def _remove_completed_item(self, item: DownloadItem) -> None:
-        self._manager.remove_completed(item)
-
-    # ------------------------------------------------------------------ lists
-    def _refresh_lists(self) -> None:
-        # Waiting queue (rebuild; rows carry their own ✕).
-        self.queue_list.clear()
-        for item in self._manager.queue_items():
-            row = _QueueRow(item)
-            li = QListWidgetItem()
-            li.setSizeHint(row.sizeHint())
-            self.queue_list.addItem(li)
-            self.queue_list.setItemWidget(li, row)
-        # Completed list (rebuild; cleared on startup since state never
-        # persists completed downloads).
-        self.completed_list.clear()
-        for item in self._manager.completed_items():
-            row = _CompletedRow(item)
-            li = QListWidgetItem()
-            li.setSizeHint(row.sizeHint())
-            self.completed_list.addItem(li)
-            self.completed_list.setItemWidget(li, row)
-        if self._has_anything_paused():
-            self.pause_all_btn.setText("Resume all")
-        elif not self._manager._paused_items:
-            self.pause_all_btn.setText("Pause all")
 
     # ------------------------------------------------------------------ state persistence
     def _save_state(self) -> None:
@@ -488,6 +579,7 @@ class MainWindow(QMainWindow):
         payload = load_state()
         if payload is None:
             self._state_save_timer.start()
+            self._refresh_downloads()
             return
         saved = payload.get("settings", {})
         for key in ("max_parallel", "max_attempts", "initial_backoff",
@@ -505,62 +597,10 @@ class MainWindow(QMainWindow):
         if url_input:
             self.url_input.setText(url_input)
 
+        self._refresh_downloads()
         if self._has_anything_paused():
             self.pause_all_btn.setText("Resume all")
         self._state_save_timer.start()
-
-    # ------------------------------------------------------------------ active downloads
-    def _on_item_started(self, item: DownloadItem) -> None:
-        list_item = self._active_rows.get(item)
-        if list_item is None:
-            row_widget = _ActiveRow(item, self._manager)
-            list_item = QListWidgetItem()
-            list_item.setSizeHint(row_widget.sizeHint())
-            self.active_list.addItem(list_item)
-            self.active_list.setItemWidget(list_item, row_widget)
-            self._active_rows[item] = list_item
-        else:
-            widget = self.active_list.itemWidget(list_item)
-            if isinstance(widget, _ActiveRow):
-                widget.set_paused(False)
-                widget.update_progress(0, 0)
-                widget._eta.setText("ETA: --:--")
-        if item.paused:
-            widget = self.active_list.itemWidget(list_item)
-            if isinstance(widget, _ActiveRow) and widget.pause_btn.text() != "Resume":
-                widget.set_paused(True)
-        self.status_label.setText(f"Downloading: {item.url}")
-
-    def _on_item_progress(self, item: DownloadItem, percent: int, eta_seconds: int) -> None:
-        list_item = self._active_rows.get(item)
-        if list_item is None:
-            return
-        widget = self.active_list.itemWidget(list_item)
-        if isinstance(widget, _ActiveRow):
-            widget.update_progress(percent, eta_seconds)
-
-    def _on_item_status(self, item: DownloadItem, message: str) -> None:
-        self.status_label.setText(message)
-
-    def _on_item_finished(
-        self, item: DownloadItem, success: bool, message: str, destination: str
-    ) -> None:
-        status = "Finished" if success else "FAILED"
-        self.status_label.setText(
-            f"{status}: {item.url} — {message}"
-            + (f" [saved to {destination}]" if success and destination else "")
-        )
-        if success:
-            self._remove_active_row(item)   # moves to Completed list
-        else:
-            self._remove_active_row(item)
-
-    def _remove_active_row(self, item: DownloadItem) -> None:
-        list_item = self._active_rows.pop(item, None)
-        if list_item is not None:
-            row = self.active_list.row(list_item)
-            if row >= 0:
-                self.active_list.takeItem(row)
 
     # ------------------------------------------------------------------ exit
     def _exit_without_prompting(self) -> None:
@@ -577,8 +617,6 @@ class MainWindow(QMainWindow):
         )
 
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt override name
-        # Always persist state before exiting (graceful shutdown saves the
-        # queue and active downloads so they auto-resume on next start).
         self._save_state()
         if self._force_quit or not self._manager.active_items():
             self._closing = True

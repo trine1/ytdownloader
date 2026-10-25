@@ -70,9 +70,14 @@ python -m yt_downloader
   **Settings → Preferences**).
 - **Robust completion verification**: destination exists, non-zero size,
   recently modified, and (for video) ffprobe-able.
-- **Completed downloads list**: successfully finished items appear in the
-  Completed section of the window. Completed downloads are *not* restored on
-  startup (they show only in the session that downloaded them).
+- **Downloads section (merged view)**: a single "Downloads" list shows every
+  item — running (live progress bar, ETA, pause/resume), paused, queued,
+  awaiting-retry, completed (green ✓) and failed (red ✗). Each item is a row
+  with its own progress bar (0–100%), an ETA/status text, pause/resume
+  controls and an ✕ remove button. Fully downloaded and failed items appear
+  greyed out (progress/controls disabled) but stay listed until removed with
+  their ✕. Completed downloads are *not* restored on startup (they show only
+  in the session that downloaded them).
 - **✕ remove button** next to every queued, active, and completed entry, so
   any item can be dropped from any list at any time.
 - **Automatic state save**: settings, the queue, and active downloads are

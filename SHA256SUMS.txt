@@ -1,2 +1,2 @@
-f657d75858a105bda38dd3519a687aa90a9fb53145c9fae8c6d6d33b6eb67eda  ytdownloader_0.2.0_amd64.deb
-25087865c579abe6cac1df4b32d154bfe038bb83dc8f5b80e596d711507bea07  ytdownloader-0.2.0-linux-installer.sh
+a5268e457fe12b89da4680c732651192a757896cd6e0c3d82a87404658e93bfd  ytdownloader_0.3.0_amd64.deb
+f81a853f9b6755f9e5b818b466cf861710940e418497d6f31d296bddb0c9805c  ytdownloader-0.3.0-linux-installer.sh

@@ -1,3 +1,16 @@
+ytdownloader (0.3.0-1) bookworm; urgency=medium
+
+  * Single merged Downloads list: running, paused, pending, retrying,
+    completed and failed items all visible with progress bars 0-100%.
+  * Completed/failed rows greyed out; pause/resume disabled, ✕ still removes.
+  * Fix: completed downloads previously vanished (never shown in Finished/
+    Completed section) - terminal state now refreshes the list.
+  * Fix: long URLs no longer clip the progress bar, ETA and buttons off
+    the row (label width no longer drives the row size hint).
+  * Pending items can be paused/resumed individually from their rows.
+
+ -- User <user@example.com>  Sun, 25 Oct 2026 18:30:00 +0000
+
 ytdownloader (0.2.0-1) bookworm; urgency=medium
 
   * Invidious-style URLs accepted (inv.nadeko.net, invidious.tiekoetter.com, ...).
