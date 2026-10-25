@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import re
-import subprocess
 from typing import Any, Dict, List, Optional
 
 from PyQt6.QtCore import QObject, QTimer, pyqtSignal
@@ -527,53 +526,6 @@ class DownloadManager(QObject):
         self.queue_changed.emit()
         self._start_next()
 
-    # ---- completion verification -----------------------------------------
-    @staticmethod
-    def _verify_completion(item: DownloadItem, destination: Optional[str]) -> str:
-        """Return an empty string if the download looks complete, else an error.
-
-        Measures used:
-          * destination path is non-empty
-          * file exists
-          * file size > 0
-          * file was modified within the last 10 minutes (fresh)
-          * for video, ffprobe reports a valid stream (best effort)
-        """
-        if not destination:
-            return "no destination path reported by yt-dlp"
-        if not os.path.exists(destination):
-            return f"output file missing: {destination}"
-        try:
-            size = os.path.getsize(destination)
-        except OSError:
-            return f"cannot stat output file: {destination}"
-        if size == 0:
-            return f"output file is empty: {destination}"
-        # Freshness check (guard against a stale file left from a previous run).
-        try:
-            mtime = os.path.getmtime(destination)
-        except OSError:
-            return f"cannot stat output file: {destination}"
-        import time
-
-        if time.time() - mtime > 600:
-            return f"output file not freshly modified: {destination}"
-        # For video merges, confirm the container is at least probe-able.
-        if item.kind == "video":
-            try:
-                subprocess.run(
-                    ["ffprobe", "-v", "error", "-show_entries",
-                     "stream=codec_type", "-of", "csv=p=0", destination],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    timeout=20,
-                    check=False,
-                )
-            except (FileNotFoundError, subprocess.SubprocessError):
-                # ffprobe missing or failed — non-fatal, yt-dlp already merged.
-                pass
-        return ""
-
     # ---- worker finished callback ----------------------------------------
     def _on_attempt_finished(
         self,
@@ -597,12 +549,8 @@ class DownloadManager(QObject):
             QTimer.singleShot(0, self._start_next)
             return
 
-        if success:
-            err = self._verify_completion(item, destination)
-            if err:
-                success = False
-                message = f"verification failed: {err}"
-
+        # Terminal verdict comes from the worker (which verified completion in
+        # its own thread); the UI thread never blocks here.
         if success:
             self.item_finished.emit(item, True, message, destination or "")
             # Track as completed so the Downloads list shows it (greyed out).
@@ -611,8 +559,9 @@ class DownloadManager(QObject):
             self.queue_changed.emit()
             # Slot freed; start more queued items.
             QTimer.singleShot(0, self._start_next)
+            self._scrub_terminal(item)
         elif item.attempts < item.max_attempts:
-            # Schedule a retry.
+            # Schedule a retry (item stays visible via _scheduled_retries).
             self._retry_later(item)
         else:
             self.item_finished.emit(item, False, message, destination or "")
@@ -620,8 +569,11 @@ class DownloadManager(QObject):
             self._failed.append(item)
             self.queue_changed.emit()
             QTimer.singleShot(0, self._start_next)
-        # Terminal bookkeeping in ANY case: scrub limbo/retry ghosts so the
-        # item can never linger in a paused/retry pool after it is done.
+            self._scrub_terminal(item)
+
+    def _scrub_terminal(self, item: DownloadItem) -> None:
+        """Terminal bookkeeping: scrub limbo/retry ghosts so a finished item
+        can never linger in a paused/retry pool, and reset its flags."""
         if item in self._paused_items:
             self._paused_items.remove(item)
         if item in self._scheduled_retries:

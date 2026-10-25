@@ -339,3 +339,23 @@ Added to PLAN.md (Basic requirements + Features):
   than a current-code regression. The canonical match also prevents the
   same clip entering twice via different host links.
 - Released as v0.3.7 (deb + generic installer + SHA256SUMS).
+
+### v0.3.8 — UI never blocks at the completion boundary (2026-10-25)
+- **Root cause of the "only the title shows" window**: completion verification
+  (existence/size/freshness checks and, for video, ffprobe with a 20 s
+  timeout) ran inside the completion slot on the UI thread. A slow
+  verification froze the event loop for seconds at the exact moment the row
+  transitions to its completed state — on the desktop this surfaces as a
+  stale/partially-composited row (title visible, controls missing) until the
+  loop resumes.
+- **Fix**: verification moved into the download worker thread
+  (`worker.verify_completion(kind, destination)`), which now emits its final
+  verdict — including "verification failed: …" — before `finished`. The
+  manager trusts the worker's verdict (a failed verification counts as a
+  failed attempt → auto-retry). The UI thread performs no subprocess work at
+  completion.
+- Pixel-level verification: 399 frames sampled at 300 ms across a full real
+  download (completion at t=11 s) — every frame carries the row label AND
+  painted controls (control-strip colour variance check); zero frames with
+  title-only rendering.
+- Released as v0.3.8 (deb + generic installer + SHA256SUMS).

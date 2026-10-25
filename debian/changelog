@@ -1,3 +1,12 @@
+ytdownloader (0.3.8-1) bookworm; urgency=medium
+
+  * Completion verification (file checks + ffprobe) moved into the download
+    worker thread. The UI thread is never blocked at the end of a download,
+    so the row's progress bar, percentage, pause/resume and X controls stay
+    rendered without a gap while the program acknowledges completion.
+
+ -- User <user@example.com>  Mon, 26 Oct 2026 14:00:00 +0000
+
 ytdownloader (0.3.7-1) bookworm; urgency=medium
 
   * Duplicate detection is now canonical: desktop (www), mobile (m),

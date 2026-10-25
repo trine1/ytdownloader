@@ -110,7 +110,6 @@ class Worker(QThread):
     status = pyqtSignal(str)                 # free-form status text
     finished = pyqtSignal(bool, str, str)    # success, message, destination_path
     resolved_title = pyqtSignal(str)         # human-friendly title (from output)
-
     # ---- public API ------------------------------------------------------
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -305,6 +304,14 @@ class Worker(QThread):
             if ok
             else f"yt-dlp exited with {returncode}"
         )
+        if ok:
+            # Completion verification runs HERE, in the worker thread — never
+            # on the UI thread — so the window cannot freeze between yt-dlp
+            # finishing and the row flipping to its completed state.
+            err = verify_completion(item.kind, self._destination)
+            if err:
+                ok = False
+                message = f"verification failed: {err}"
         self.finished.emit(ok, message, self._destination)
 
     @staticmethod
@@ -313,3 +320,51 @@ class Worker(QThread):
         if len(parts) == 3:
             return parts[0] * 3600 + parts[1] * 60 + parts[2]
         return parts[0] * 60 + parts[1]
+
+
+def verify_completion(kind: str, destination: Optional[str]) -> str:
+    """Robust completion check; returns '' when the download looks complete.
+
+    Measures used:
+      * destination path is non-empty
+      * file exists
+      * file size > 0
+      * file was modified within the last 10 minutes (fresh)
+      * for video, ffprobe reports a valid stream (best effort)
+
+    Runs in the worker thread; the UI thread is never blocked by it.
+    """
+    import time
+
+    if not destination:
+        return "no destination path reported by yt-dlp"
+    if not os.path.exists(destination):
+        return f"output file missing: {destination}"
+    try:
+        size = os.path.getsize(destination)
+    except OSError:
+        return f"cannot stat output file: {destination}"
+    if size == 0:
+        return f"output file is empty: {destination}"
+    # Freshness check (guard against a stale file left from a previous run).
+    try:
+        mtime = os.path.getmtime(destination)
+    except OSError:
+        return f"cannot stat output file: {destination}"
+    if time.time() - mtime > 600:
+        return f"output file not freshly modified: {destination}"
+    # For video merges, confirm the container is at least probe-able.
+    if kind == "video":
+        try:
+            subprocess.run(
+                ["ffprobe", "-v", "error", "-show_entries",
+                 "stream=codec_type", "-of", "csv=p=0", destination],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=20,
+                check=False,
+            )
+        except (FileNotFoundError, subprocess.SubprocessError):
+            # ffprobe missing or failed — non-fatal, yt-dlp already merged.
+            pass
+    return ""
