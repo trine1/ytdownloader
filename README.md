@@ -54,6 +54,14 @@ python -m yt_downloader
   verify it is the file you want.
 - **Explicit start only**: nothing downloads until you press **Download**
   (starts immediately, ahead of items already waiting).
+- **Per-format downloads**: the same source can be downloaded in different
+  formats (audio and video are separate, independent items). Filenames are
+  guaranteed distinct per format — `<title> [audio].<ext>` /
+  `<title> [video].<ext>` — so the two can never overwrite each other's
+  existing or in-progress files.
+- **No duplicate downloads**: a source already queued or downloading in the
+  same format is refused with a notice. A source already downloaded earlier
+  (or previously failed) is requested again with a confirmation dialog.
 - **Pause downloads / Clear downloaded** sit underneath the Downloads list
   (right-aligned): pause pauses every active and pending item at once
   (persists across restart); clear removes only completed/failed items —

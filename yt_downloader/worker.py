@@ -53,6 +53,20 @@ def format_seconds(seconds: Optional[int]) -> str:
     return f"{minutes}:{secs:02d}"
 
 
+def output_template_for(item: DownloadItem) -> str:
+    """yt-dlp -o template for *item*.
+
+    Distinct filenames per format guarantee that the audio and the video
+    download of the same source never overwrite each other's existing or
+    in-progress files.
+    """
+    filename_suffix = "audio" if item.kind == "audio" else "video"
+    return os.path.join(
+        item.output_dir,
+        f"%(title)s [{filename_suffix}].%(ext)s",
+    )
+
+
 @dataclass
 class DownloadItem:
     """A single queued download."""
@@ -67,6 +81,7 @@ class DownloadItem:
     max_backoff: int = 300            # seconds, cap for exponential backoff
     paused: bool = False              # set when the user pauses the download
     resume: bool = False              # set when the user resumes; worker passes -c
+    resumed_after_pause: bool = False # next launch was user-resume: don't count an attempt
 
     def __hash__(self) -> int:
         return id(self)
@@ -213,7 +228,7 @@ class Worker(QThread):
         assert self._item is not None
         item = self._item
         os.makedirs(item.output_dir, exist_ok=True)
-        output_template = os.path.join(item.output_dir, "%(title)s.%(ext)s")
+        output_template = output_template_for(item)
 
         args = ["yt-dlp", "--no-playlist", "--extractor-args", "youtube:player_client=android"]
         if getattr(self, "_resume", False):

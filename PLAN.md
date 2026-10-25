@@ -292,3 +292,30 @@ Added to PLAN.md (Basic requirements + Features):
   the background → row relabels → resume → completes greyed Done/100% with
   file on disk.
 - Released as v0.3.5 (deb + generic installer + SHA256SUMS).
+
+### v0.3.6 — per-format downloads + duplicate/re-download guards (2026-10-25)
+- **(url, kind) is the item key**: the same source may be downloaded as audio
+  AND video (separate items). `manager.matching_item(url, kind)` finds any
+  existing item in that pair; add/queue duplicate handling:
+  - same (url, kind) already queued/running/paused/scheduled → refuses with a
+    notice (no message spam, no duplicates),
+  - already completed earlier in the session → confirmation dialog
+    (default No) before re-downloading,
+  - previously failed → confirmation dialog before retrying.
+- **Filenames differ per format** (never overwrite): output templates are
+  `%(title)s [audio].%(ext)s` / `%(title)s [video].%(ext)s`
+  (`worker.output_template_for(item)` helper, unit-tested).
+- **Pausing/resuming does not consume attempts**: each `resume_item` marks the
+  next launch a continuation; `_launch` skips the attempts increment and
+  clears the marker.
+- Downloads-list rebuilds compare a (item, state, title) signature to the
+  previous render and skip no-op refreshes entirely → during a long download
+  unrelated signals (title chain finishing, etc.) cannot tear down
+  progress-bearing rows. Terminal items are scrubbed from
+  paused/retry pools on completion/failure (no ghost states reverting rows).
+- Removed the Download button tooltip per request.
+- Verified: features suite (guards, formats, attempts, tooltip) + stress run
+  of a real download resume with rapid pause/resume toggles — zero row anomalies
+  across 345 monitor ticks, no mid-download teardown storms (rebuild count 18
+  total incl. toggles + title resolution), no modal/lockups.
+- Released as v0.3.6 (deb + generic installer + SHA256SUMS).

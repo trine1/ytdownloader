@@ -86,6 +86,24 @@ class DownloadManager(QObject):
         worker.finished.connect(lambda *_: worker.deleteLater())
         worker.validate(text)
 
+    def matching_item(self, url: str, kind: str) -> Optional[DownloadItem]:
+        """An existing item for the same (source, format) pair, in any state.
+
+        Completed and failed items are included so callers can offer to
+        re-download; queued/active/paused/scheduled items represent live
+        work. Note the same source in a DIFFERENT format is a separate item
+        (audio and video files have distinct names on disk).
+        """
+        def same(it: DownloadItem) -> bool:
+            return it.url == url and it.kind == kind
+        for pool in (list(self._active.values()), self._paused_items,
+                     self._queue, self._scheduled_retries,
+                     self._completed, self._failed):
+            for it in pool:
+                if same(it):
+                    return it
+        return None
+
     def _make_item(self, url: str, kind: str, output_dir: str,
                    title: str = "") -> DownloadItem:
         return DownloadItem(
@@ -272,7 +290,8 @@ class DownloadManager(QObject):
     def resume_item(self, item: DownloadItem) -> None:
         """Resume a paused or stopped download by re-queueing it."""
         item.paused = False
-        item.resume = True
+        item.resume = True            # continue the partial file with -c
+        item.resumed_after_pause = True   # next launch is not a new attempt
         if item in self._paused_items:
             self._paused_items.remove(item)
         if item not in self._queue:
@@ -389,8 +408,9 @@ class DownloadManager(QObject):
             self._launch(item, increment_attempts=increment_attempts)
 
     def _launch(self, item: DownloadItem, increment_attempts: bool = True) -> None:
-        if increment_attempts:
+        if increment_attempts and not getattr(item, "resumed_after_pause", False):
             item.attempts += 1
+        item.resumed_after_pause = False
         worker = Worker()
         self._active[worker] = item
         worker.progress.connect(
@@ -576,3 +596,11 @@ class DownloadManager(QObject):
             self._failed.append(item)
             self.queue_changed.emit()
             QTimer.singleShot(0, self._start_next)
+        # Terminal bookkeeping in ANY case: scrub limbo/retry ghosts so the
+        # item can never linger in a paused/retry pool after it is done.
+        if item in self._paused_items:
+            self._paused_items.remove(item)
+        if item in self._scheduled_retries:
+            self._scheduled_retries.remove(item)
+        item.resume = False
+        item.resumed_after_pause = False

@@ -1,3 +1,22 @@
+ytdownloader (0.3.6-1) bookworm; urgency=medium
+
+  * Same source may be downloaded in different formats: duplicate detection
+    is keyed on (source URL, format). Audio and video of one URL are
+    separate, independent downloads.
+  * Filenames differ per format — outputs are "<title> [audio].<ext>" and
+    "<title> [video].<ext>" — so the two formats of one source can never
+    overwrite each other's existing or in-progress files.
+  * Sources already queued/active (same format) are rejected with a notice;
+    sources already downloaded earlier are confirmed by dialog before a
+    re-download; previously failed sources ask before retrying.
+  * Pausing and resuming no longer consume retry attempts.
+  * Downloads-list rebuilds now skip no-op refreshes (state-signature
+    comparison) so live rows are never torn down mid-download.
+  * Terminal items are scrubbed from paused/retry pools (no ghost states).
+  * The Download button no longer shows a tooltip.
+
+ -- User <user@example.com>  Mon, 26 Oct 2026 02:00:00 +0000
+
 ytdownloader (0.3.5-1) bookworm; urgency=medium
 
   * Downloads rows now show the human-friendly video title instead of the

@@ -46,6 +46,25 @@ class _XButton(QPushButton):
         self.clicked.connect(on_click)
 
 
+def _row_state(item: DownloadItem, manager: DownloadManager) -> str:
+    """Which visual state a row for *item* should show.
+
+    Use ordering: terminal states first, then paused (limbo/queue flag),
+    running, scheduled-retry, pending.
+    """
+    if item in manager.completed_items():
+        return "completed"
+    if item in manager.failed_items():
+        return "failed"
+    if item.paused:
+        return "paused"
+    if item in manager.active_items():
+        return "running"
+    if manager.is_retry_scheduled(item):
+        return "retrying"
+    return "pending"
+
+
 class _DownloadRow(QWidget):
     """One row in the Downloads list — used for every state of an item.
 
@@ -103,16 +122,7 @@ class _DownloadRow(QWidget):
         return None
 
     def _state(self) -> str:
-        terminal = self._terminal_state()
-        if terminal:
-            return terminal
-        if self.item.paused:
-            return "paused"
-        if self.item in self.manager.active_items():
-            return "running"
-        if self.manager.is_retry_scheduled(self.item):
-            return "retrying"
-        return "pending"
+        return _row_state(self.item, self.manager)
 
     def _caption(self) -> str:
         item = self.item
@@ -247,6 +257,7 @@ class MainWindow(QMainWindow):
 
         # item -> row (list item) registry is rebuilt on queue changes.
         self._row_registry: Dict[DownloadItem, QListWidgetItem] = {}
+        self._last_signature = None
 
         self._build_ui()
         self._connect_signals()
@@ -329,7 +340,6 @@ class MainWindow(QMainWindow):
         self.download_btn = QPushButton("Download")
         self.download_btn.setFixedWidth(110)
         self.download_btn.setEnabled(False)
-        self.download_btn.setToolTip("Start this download immediately")
         actions.addWidget(self.download_btn)
         actions.addStretch(1)
         layout.addLayout(actions)
@@ -457,8 +467,51 @@ class MainWindow(QMainWindow):
         target = self._validated_target()
         if target is None:
             return
-        self._manager.add_now(*target)
+        url, kind, output_dir = target
+        if not self._confirm_download(url, kind):
+            return
+        self._manager.add_now(url, kind, output_dir,
+                              title=self._validated_title or "")
         self._reset_validation_input()
+
+    def _confirm_download(self, url: str, kind: str) -> bool:
+        """Guard: reject live duplicates, confirm re-downloads.
+
+        * Same source already queued/active/paused in the SAME format →
+          message box, download refused (no duplicates can clutter the list).
+        * Same source already downloaded earlier in this session → ask the
+          user whether to download it again (the file may be wanted in a
+          different format — that is a different item and needs no prompt).
+        """
+        existing = self._manager.matching_item(url, kind)
+        if existing is None:
+            return True
+        if existing in self._manager.completed_items():
+            reply = QMessageBox.question(
+                self, "Already downloaded",
+                f"This source has already been downloaded\n"
+                f"({existing.title or existing.url}).\n\n"
+                f"Download it again?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            return reply == QMessageBox.StandardButton.Yes
+        if existing in self._manager.failed_items():
+            reply = QMessageBox.question(
+                self, "Previously failed",
+                "This source failed to download earlier.\n\nTry again now?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            return reply == QMessageBox.StandardButton.Yes
+        QMessageBox.warning(
+            self, "Already in Downloads",
+            "That source (in this format) is already in the Downloads list:\n"
+            f"{existing.title or existing.url}\n\n"
+            "Same sources may be downloaded in different formats — switch the "
+            "Format option if that is what you intend.",
+        )
+        return False
 
     def _reset_validation_input(self) -> None:
         self.url_input.clear()
@@ -487,16 +540,39 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------ merged Downloads list
     def _refresh_downloads(self) -> None:
-        """Rebuild the single Downloads list from the manager's items."""
+        """Sync the single Downloads list with the manager's items.
+
+        To keep live rows rock-solid, the list is rebuilt only when the
+        item set or any item's state actually changed (signature comparison).
+        Rebuilds fired from unrelated signals during a long download are
+        ignored, so progress bars and controls are never torn down mid-run.
+        """
+        items = self._manager.display_items()
+        signature = [
+            (id(it), _row_state(it, self._manager), getattr(it, "title", ""))
+            for it in items
+        ]
+        rows_intact = all(
+            it in self._row_registry
+            and self.downloads_list.itemWidget(self._row_registry[it]) is not None
+            for it in items
+        )
+        if signature == self._last_signature and rows_intact:
+            self._sync_pause_button()
+            return
+        self._last_signature = signature
         self.downloads_list.clear()
         self._row_registry.clear()
-        for item in self._manager.display_items():
+        for item in items:
             row = _DownloadRow(item, self._manager)
             li = QListWidgetItem()
             li.setSizeHint(QSize(row.sizeHint().width(), row._item_height))
             self.downloads_list.addItem(li)
             self.downloads_list.setItemWidget(li, row)
             self._row_registry[item] = li
+        self._sync_pause_button()
+
+    def _sync_pause_button(self) -> None:
         if self._has_anything_paused():
             self.pause_all_btn.setText("Resume downloads")
         elif not self._manager._paused_items:
