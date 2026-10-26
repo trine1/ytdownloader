@@ -1,3 +1,3 @@
 """YouTube downloader: a Qt graphical tool for downloading audio/video."""
 
-__version__ = "0.3.9"
+__version__ = "0.4.0"

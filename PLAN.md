@@ -381,3 +381,25 @@ Added to PLAN.md (Basic requirements + Features):
   (84/84 records painted, both the running and the greyed completed state);
   features suite green; offscreen pixel test green.
 - Released as v0.3.9 (deb + generic installer + SHA256SUMS).
+
+### v0.4.0 — persistent row widgets (2026-10-26)
+- The user still saw title-only rows after completion (redraw only on
+  workspace switch) even after v0.3.9's synchronous repaints. The remaining
+  structural hazard: every `queue_changed` rebuild tore down and recreated
+  ALL row widgets (`downloads_list.clear()`), and Qt/Wayland could leave
+  the freshly recreated rows' control regions unpainted until an expose.
+- **Fix**: rows are now PERSISTENT per item:
+  - created once, updated in place on state/title changes
+    (`_row_state_cache` diff → `apply_state()` + `repaint()`),
+  - pruned individually when the item leaves the list,
+  - NEVER moved (takeItem/insertItem destroys Qt index-widgets, which is
+    the exact teardown hazard being eliminated) — the list keeps insertion
+    order.
+- Worker-derived titles no longer carry the per-format suffix
+  (`Me at the zoo [audio]` → `Me at the zoo`).
+- Verified: persistent-identity suite (widget instance survives refresh
+  storms; in-place title update; completion greys the SAME widget;
+  pause/resume click cycles keep the widget; removal prunes exactly one
+  row) + native-Wayland dual probe (screen-blank rows: 0 across the whole
+  run incl. 70 s post-completion).
+- Released as v0.4.0 (deb + generic installer + SHA256SUMS).

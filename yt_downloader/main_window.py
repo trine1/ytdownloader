@@ -261,9 +261,9 @@ class MainWindow(QMainWindow):
             for k in ("max_parallel", "max_attempts", "initial_backoff", "max_backoff")
         })
 
-        # item -> row (list item) registry is rebuilt on queue changes.
-        self._row_registry: Dict[DownloadItem, QListWidgetItem] = {}
-        self._last_signature = None
+        # item -> (list item, row widget); rows are persistent per item.
+        self._row_registry: Dict[DownloadItem, tuple] = {}
+        self._row_state_cache: Dict[DownloadItem, tuple] = {}
 
         self._build_ui()
         self._connect_signals()
@@ -548,38 +548,51 @@ class MainWindow(QMainWindow):
     def _refresh_downloads(self) -> None:
         """Sync the single Downloads list with the manager's items.
 
-        To keep live rows rock-solid, the list is rebuilt only when the
-        item set or any item's state actually changed (signature comparison).
-        Rebuilds fired from unrelated signals during a long download are
-        ignored, so progress bars and controls are never torn down mid-run.
+        Row widgets are PERSISTENT: a row is created once per item and then
+        only updated in place (state changes), moved (ordering) or removed
+        (item gone). The old approach — clear() + recreate every widget on
+        each change — could leave the compositor showing a stale frame in
+        which only the row's label was painted (progress bar / ETA /
+        Pause-Resume / ✕ invisible until an expose event, e.g. switching
+        workspaces). With persistent rows there is no mass widget teardown,
+        so there is nothing to go stale.
         """
         items = self._manager.display_items()
-        signature = [
-            (id(it), _row_state(it, self._manager), getattr(it, "title", ""))
-            for it in items
-        ]
-        rows_intact = all(
-            it in self._row_registry
-            and self.downloads_list.itemWidget(self._row_registry[it]) is not None
-            for it in items
-        )
-        if signature == self._last_signature and rows_intact:
-            self._sync_pause_button()
-            return
-        self._last_signature = signature
-        self.downloads_list.clear()
-        self._row_registry.clear()
-        for item in items:
-            row = _DownloadRow(item, self._manager)
-            li = QListWidgetItem()
-            li.setSizeHint(QSize(row.sizeHint().width(), row._item_height))
-            self.downloads_list.addItem(li)
-            self.downloads_list.setItemWidget(li, row)
-            self._row_registry[item] = li
-        # Force the fresh rows onto the screen NOW: the rebuild's scheduled
-        # updates are not reliably turned into a compositor frame under
-        # Wayland (rows could show only their label until a mouse-over).
-        self.downloads_list.viewport().repaint()
+
+        # 1. Remove rows of items that are no longer displayed.
+        for it in list(self._row_registry.keys()):
+            if all(it is not x for x in items):
+                li, row = self._row_registry.pop(it)
+                self._row_state_cache.pop(it, None)
+                idx = self.downloads_list.row(li)
+                if idx >= 0:
+                    self.downloads_list.takeItem(idx)
+                row.deleteLater()
+
+        # 2. Create missing rows and update existing ones in place.
+        for it in items:
+            state = _row_state(it, self._manager)
+            title = getattr(it, "title", "")
+            entry = self._row_registry.get(it)
+            if entry is None:
+                row = _DownloadRow(it, self._manager)
+                li = QListWidgetItem()
+                li.setSizeHint(QSize(row.sizeHint().width(), row._item_height))
+                self.downloads_list.addItem(li)
+                self.downloads_list.setItemWidget(li, row)
+                self._row_registry[it] = (li, row)
+                self._row_state_cache[it] = (state, title)
+            else:
+                li, row = entry
+                if self._row_state_cache.get(it) != (state, title):
+                    row.apply_state()
+                    self._row_state_cache[it] = (state, title)
+        # NOTE: rows are never MOVED. Reordering via takeItem/insertItem
+        # destroys and recreates the row's widget (Qt owns index widgets of
+        # removed rows), which is exactly the stale-paint hazard this
+        # persistent-row design eliminates. The list keeps insertion order.
+
+        self.downloads_list.viewport().update()
         self._sync_pause_button()
 
     def _sync_pause_button(self) -> None:
@@ -589,10 +602,10 @@ class MainWindow(QMainWindow):
             self.pause_all_btn.setText("Pause downloads")
 
     def _row_widget(self, item: DownloadItem):
-        li = self._row_registry.get(item)
-        if li is None:
+        entry = self._row_registry.get(item)
+        if entry is None:
             return None
-        return self.downloads_list.itemWidget(li)
+        return entry[1]
 
     def _on_item_started(self, item: DownloadItem) -> None:
         # Prefer touching just this row; rebuild only if it isn't on screen.
@@ -620,19 +633,18 @@ class MainWindow(QMainWindow):
             setattr(item, "destination", destination or getattr(item, "destination", ""))
             setattr(item, "last_pct", 100)
             self.status_label.setText(
-                f"Finished: {item.url}" + (f" [saved to {destination}]" if destination else "")
+                f"Finished: {item.title or item.url}"
+                + (f" [saved to {destination}]" if destination else "")
             )
         else:
             setattr(item, "fail_message", message)
-            self.status_label.setText(f"FAILED: {item.url} — {message}")
-        self._remove_row_entry(item)
+            self.status_label.setText(f"FAILED: {item.title or item.url} — {message}")
+        # The row itself is refreshed by the queue_changed that the manager
+        # emits right after this signal (persistent rows update in place).
 
     def _on_item_completed(self, item: DownloadItem, destination: str) -> None:
-        # Rebuild so the item reappears greyed-out inside the merged list.
+        # The item reappears greyed-out inside the merged list.
         self._refresh_downloads()
-
-    def _remove_row_entry(self, item: DownloadItem) -> None:
-        self._row_registry.pop(item, None)
 
     def _remove_item(self, item: DownloadItem) -> None:
         """Route the ✕ press for whichever state the item is in."""

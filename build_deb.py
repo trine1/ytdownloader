@@ -16,7 +16,7 @@ import tarfile
 import time
 
 PACKAGE = "ytdownloader"
-VERSION = "0.3.9-1"
+VERSION = "0.4.0-1"
 ARCH = "amd64"
 OUTPUT = f"{PACKAGE}_{VERSION.split('-')[0]}_{ARCH}.deb"
 

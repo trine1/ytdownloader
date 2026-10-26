@@ -1,3 +1,15 @@
+ytdownloader (0.4.0-1) bookworm; urgency=medium
+
+  * Downloads rows are now persistent widgets: created once per item, then
+    updated in place — never torn down and recreated. This fixes the
+    remaining stale-frame cases under Wayland where a finished download
+    showed only its title until an expose event (e.g. switching
+    workspaces) forced a redraw; the progress bar, percentage, Done and X
+    now appear immediately.
+  * Worker-derived titles no longer include the per-format suffix.
+
+ -- User <user@example.com>  Mon, 26 Oct 2026 16:30:00 +0000
+
 ytdownloader (0.3.9-1) bookworm; urgency=medium
 
   * Fix rows rendering without their controls under Wayland: after a

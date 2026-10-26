@@ -285,6 +285,9 @@ class Worker(QThread):
                 if item is not None and not getattr(item, "title", ""):
                     stem = os.path.splitext(self._destination)[0]
                     title = os.path.basename(stem).strip()
+                    # Drop the per-format suffix (added for filename
+                    # collision-safety) so the row shows the clean title.
+                    title = re.sub(r"\s*\[(?:audio|video)\]$", "", title).strip()
                     if title:
                         item.title = title
                         self.resolved_title.emit(title)
