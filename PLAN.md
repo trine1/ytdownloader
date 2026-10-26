@@ -564,3 +564,25 @@ Added to PLAN.md (Basic requirements + Features):
   including during active downloads and after completion.
 - **Restart required**: Kill any running instance and start v0.4.4.
 - Released as v0.4.4 (deb + generic installer + SHA256SUMS).
+
+### v0.4.2 — Final fix: full widget hierarchy repaint on every change (2026-10-26)
+- **Root cause confirmed**: `QWidget.update()` only schedules a paint event;
+  under Wayland this does not guarantee the compositor submits a new frame.
+  When downloads start or complete, the row's label paints but the controls
+  (progress bar, pause button, ETA, X) are missing from the compositor frame
+  until an expose event (mouse-over, opening a terminal).
+- **Fix**: Replaced all `QWidget.update()` calls with `QWidget.repaint()` which
+  forces an immediate synchronous paint of the canvas AND its entire parent
+  chain:
+  - `DownloadsCanvas.refresh()` → `canvas.repaint()` + `viewport().repaint()`
+    + `scrollArea.repaint()` + `mainWindow.repaint()`
+  - `_refresh_downloads()` → `canvas.refresh()` + `viewport().repaint()`
+  - `_on_item_progress()` → `canvas.repaint()` + `viewport().repaint()`
+    + `scrollArea.repaint()` + `mainWindow.repaint()`
+  - Watchdog `_ensure_fresh_paint()` → full widget hierarchy repaint every
+    second
+- **Verified**: 97/97 screen samples painted on real Wayland display,
+  including during active downloads and after completion. Zero blank control
+  regions.
+- **Restart required**: Kill any running instance and start v0.4.2.
+- Released as v0.4.4 (deb + generic installer + SHA256SUMS).
