@@ -1,3 +1,15 @@
+ytdownloader (0.3.9-1) bookworm; urgency=medium
+
+  * Fix rows rendering without their controls under Wayland: after a
+    download starts/resumes (and after it completes) the compositor could
+    keep showing a stale frame in which only the row label was painted —
+    progress bar, ETA, Pause/Resume and X invisible until a mouse-over
+    forced a redraw. Rows and the list viewport now repaint synchronously
+    on every rebuild and state change, and progress ticks repaint their
+    controls explicitly.
+
+ -- User <user@example.com>  Mon, 26 Oct 2026 15:30:00 +0000
+
 ytdownloader (0.3.8-1) bookworm; urgency=medium
 
   * Completion verification (file checks + ffprobe) moved into the download

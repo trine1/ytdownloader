@@ -151,7 +151,6 @@ class _DownloadRow(QWidget):
     def apply_state(self) -> None:
         item = self.item
         state = self._state()
-
         self._label.setText(self._caption())
         self._label.setToolTip(f"{item.url}\n{self._caption()}")
 
@@ -205,6 +204,10 @@ class _DownloadRow(QWidget):
             self._eta.setText("Queued")
             self._label.setStyleSheet("color: #333;")
         self.setSizeHint()
+        # Force a synchronous paint: under Wayland, state changes that only
+        # rely on scheduled updates may leave the compositor showing a stale
+        # row (title visible, controls missing) until a mouse-over.
+        self.repaint()
 
     def update_progress(self, percent: int, eta_seconds: int) -> None:
         setattr(self.item, "last_pct", percent)
@@ -212,6 +215,9 @@ class _DownloadRow(QWidget):
         if self._pause_btn.isEnabled():
             self._eta.setText(f"ETA: {format_seconds(eta_seconds)}")
         self._progress.setValue(percent)
+        # Deterministic repaint of the touched controls (Wayland-safe).
+        self._progress.repaint()
+        self._eta.repaint()
 
     # ---- actions ---------------------------------------------------------
     def _on_toggle_pause(self) -> None:
@@ -570,6 +576,10 @@ class MainWindow(QMainWindow):
             self.downloads_list.addItem(li)
             self.downloads_list.setItemWidget(li, row)
             self._row_registry[item] = li
+        # Force the fresh rows onto the screen NOW: the rebuild's scheduled
+        # updates are not reliably turned into a compositor frame under
+        # Wayland (rows could show only their label until a mouse-over).
+        self.downloads_list.viewport().repaint()
         self._sync_pause_button()
 
     def _sync_pause_button(self) -> None:

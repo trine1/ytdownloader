@@ -359,3 +359,25 @@ Added to PLAN.md (Basic requirements + Features):
   painted controls (control-strip colour variance check); zero frames with
   title-only rendering.
 - Released as v0.3.8 (deb + generic installer + SHA256SUMS).
+
+### v0.3.9 — Wayland repaint fix: controls always rendered (2026-10-26)
+- **Root cause (proven empirically)**: under the native-Wayland session the
+  Downloads-list rebuild (`clear()` + `setItemWidget`) did not reliably
+  result in a compositor frame. Dual-probe (screen capture via `grim` vs
+  forced in-process render via `grab()`, per tick):
+  - grab-blank rows: 0 (the widget tree always rendered correctly),
+  - screen-blank rows: 74/85 from the completion transition onward — the
+    screen showed the row's LABEL (title) but NOT its progress bar, ETA,
+    Pause/Resume or ✕, until a mouse-over forced a redraw.
+  This reproduces both user reports: controls missing for a long period
+  after starting/resuming (rebuild at add/resume) and Done/✕ appearing only
+  on pointer movement (rebuild at completion). Offscreen testing missed it
+  because `grab()` forces the render; xcb (XWayland) also masked it.
+- **Fix**: deterministic synchronous paints — `_DownloadRow.apply_state()`
+  ends with `repaint()`; `update_progress()` repaints the bar and ETA;
+  `_refresh_downloads()` repaints the list viewport after a rebuild. All
+  low-frequency operations; visual cost negligible.
+- **Verified under native Wayland**: same dual-probe → screen-blank rows: 0
+  (84/84 records painted, both the running and the greyed completed state);
+  features suite green; offscreen pixel test green.
+- Released as v0.3.9 (deb + generic installer + SHA256SUMS).
