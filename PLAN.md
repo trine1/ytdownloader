@@ -403,3 +403,30 @@ Added to PLAN.md (Basic requirements + Features):
   row) + native-Wayland dual probe (screen-blank rows: 0 across the whole
   run incl. 70 s post-completion).
 - Released as v0.4.0 (deb + generic installer + SHA256SUMS).
+
+### v0.4.1 — THE fix: no enabled-toggling + watchdog guarantee (2026-10-26)
+- With VALID screen measurement (Hyprland-based region mapping — the earlier
+  Wayland probes were invalid: Qt-Wayland's `mapToGlobal` is (0,0)-relative,
+  so all previous "screen" samples read the wrong window), the completion
+  transition was reproduced exactly: the compositor showed the row's LABEL
+  while the bar/pause/✕ regions read uniform background for 86+ consecutive
+  records — a stale frame persisting until an expose — while the widget tree
+  was correct.
+- **Root cause**: `setEnabled(False)` on the row's progress bar + button at
+  the completed/failed transition. The enabled/disabled child paint
+  transition made Qt/Wayland composite a frame WITHOUT those children.
+- **Fix**:
+  - widgets are NEVER enabled/disabled; terminal rows are greyed via a
+    cascading stylesheet (re-polish + full repaint) and the pause/done
+    button is a click-guarded no-op (the click handler checks the row's
+    state);
+  - a **1-second watchdog** synchronously repaints the Downloads viewport
+    (`_ensure_fresh_paint`), healing ANY residual staleness within one
+    second regardless of cause — the permanent guarantee the user asked
+    for.
+- Verified: valid-mapping Wayland probe → 98/98 screen samples painted
+  (before: 86 blank); persistent-row suite v2 (7 checks: identity storms,
+  in-place title, completion greying + click-guard, pause/resume cycles,
+  pruning, failed-row greying); features suite; 398-frame pixel test.
+- NOTE: the user's running instance must be RESTARTED to pick up this fix.
+- Released as v0.4.1 (deb + generic installer + SHA256SUMS).

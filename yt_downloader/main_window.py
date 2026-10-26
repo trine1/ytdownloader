@@ -157,52 +157,53 @@ class _DownloadRow(QWidget):
         last_pct = getattr(item, "last_pct", None)
         last_eta = getattr(item, "last_eta", None)
 
+        # IMPORTANT: the widgets' `enabled` state is NEVER toggled. Toggling
+        # enabled on the row's children at the completion transition was the
+        # trigger for Qt/Wayland compositing a frame WITHOUT those children
+        # (title visible, controls blank until an expose event). Terminal
+        # rows are greyed with a cascading stylesheet instead (which forces
+        # a full re-polish + repaint), and their buttons become no-ops via
+        # the click guard.
+        terminal = state in ("completed", "failed")
+
         if state == "completed":
             self._progress.setValue(100)
-            self._progress.setEnabled(False)
             self._eta.setText("✓")
             self._pause_btn.setText("Done")
-            self._pause_btn.setEnabled(False)
             self._label.setStyleSheet("color: #0a0;")
         elif state == "failed":
             self._progress.setValue(last_pct if last_pct is not None else 0)
-            self._progress.setEnabled(False)
             self._eta.setText("✗")
             self._pause_btn.setText("Stopped")
-            self._pause_btn.setEnabled(False)
             self._label.setStyleSheet("color: #a00;")
         elif state == "paused":
-            self._progress.setEnabled(True)
             self._pause_btn.setText("Resume")
-            self._pause_btn.setEnabled(True)
             if last_pct is not None:
                 self._progress.setValue(last_pct)
             self._eta.setText("Paused")
-            self._label.setStyleSheet("color: #b60; font-weight: normal;")
+            self._label.setStyleSheet("color: #b60;")
         elif state == "retrying":
-            self._progress.setEnabled(True)
             self._pause_btn.setText("Pause")
-            self._pause_btn.setEnabled(True)
             if last_pct is not None:
                 self._progress.setValue(last_pct)
             self._eta.setText("Retry…")
             self._label.setStyleSheet("color: #b60;")
         elif state == "running":
-            self._progress.setEnabled(True)
             self._pause_btn.setText("Pause")
-            self._pause_btn.setEnabled(True)
             self._progress.setValue(last_pct if last_pct is not None else 0)
             self._eta.setText(
                 f"ETA: {format_seconds(last_eta)}" if last_eta is not None else "ETA: --:--"
             )
             self._label.setStyleSheet("")
         else:  # pending
-            self._progress.setEnabled(True)
             self._pause_btn.setText("Pause")
-            self._pause_btn.setEnabled(True)
             self._progress.setValue(0)
             self._eta.setText("Queued")
             self._label.setStyleSheet("color: #333;")
+
+        # Row-level grey for terminal states (QSS color cascades to the
+        # button/bar text; setStyleSheet forces a re-polish + full repaint).
+        self.setStyleSheet("color: #777;" if terminal else "")
         self.setSizeHint()
         # Force a synchronous paint: under Wayland, state changes that only
         # rely on scheduled updates may leave the compositor showing a stale
@@ -221,8 +222,9 @@ class _DownloadRow(QWidget):
 
     # ---- actions ---------------------------------------------------------
     def _on_toggle_pause(self) -> None:
-        """Defer manager mutation: emitting queue_changed rebuilds the list,
-        which would destroy *this* widget while its own slot is running."""
+        # Terminal rows: the button reads Done/Stopped — clicking is a no-op.
+        if self._state() in ("completed", "failed"):
+            return
         item = self.item
         if item.paused:
             QTimer.singleShot(0, lambda: self.manager.resume_item(item))
@@ -279,8 +281,23 @@ class MainWindow(QMainWindow):
         self._validation_timer.setInterval(400)
         self._validation_timer.timeout.connect(self._run_validation)
 
+        # Repaint watchdog — THE guarantee that every Downloads row always
+        # shows its full set of controls (progress bar, %, ETA, pause/resume,
+        # ✕). Whatever the cause of a missed compositor update (a Qt/Wayland
+        # quirk, an unusual code path, an expose race), a synchronous
+        # viewport repaint every second heals any staleness within one
+        # second. Cheap: the viewport is small and rows are few.
+        self._repaint_watchdog = QTimer(self)
+        self._repaint_watchdog.setInterval(1_000)
+        self._repaint_watchdog.timeout.connect(self._ensure_fresh_paint)
+
         # Load persisted state (settings, queued + paused/active downloads).
         self._load_state()
+
+    def _ensure_fresh_paint(self) -> None:
+        """Watchdog: never leave a stale Downloads row on screen."""
+        if self.isVisible():
+            self.downloads_list.viewport().repaint()
 
     # ------------------------------------------------------------------ UI
     def _build_ui(self) -> None:
@@ -593,6 +610,10 @@ class MainWindow(QMainWindow):
         # persistent-row design eliminates. The list keeps insertion order.
 
         self.downloads_list.viewport().update()
+        # Synchronous paint of the viewport: guarantees the (re)built rows
+        # reach the compositor immediately instead of depending on scheduled
+        # updates, which Qt/Wayland can drop.
+        self.downloads_list.viewport().repaint()
         self._sync_pause_button()
 
     def _sync_pause_button(self) -> None:
@@ -645,6 +666,13 @@ class MainWindow(QMainWindow):
     def _on_item_completed(self, item: DownloadItem, destination: str) -> None:
         # The item reappears greyed-out inside the merged list.
         self._refresh_downloads()
+        # Terminal transition: force a FULL window repaint synchronously.
+        # A per-row repaint() on a freshly (re)parented widget is a no-op
+        # (nothing is exposed yet), and a partial frame here is exactly the
+        # "title shows, controls missing" artifact. A full-window synchronous
+        # paint is the programmatic equivalent of the workspace switch that
+        # always fixed it for the user.
+        self.repaint()
 
     def _remove_item(self, item: DownloadItem) -> None:
         """Route the ✕ press for whichever state the item is in."""
@@ -674,6 +702,7 @@ class MainWindow(QMainWindow):
         payload = load_state()
         if payload is None:
             self._state_save_timer.start()
+            self._repaint_watchdog.start()
             self._refresh_downloads()
             return
         saved = payload.get("settings", {})
@@ -694,6 +723,7 @@ class MainWindow(QMainWindow):
         if self._has_anything_paused():
             self.pause_all_btn.setText("Resume downloads")
         self._state_save_timer.start()
+        self._repaint_watchdog.start()
 
     # ------------------------------------------------------------------ exit
     def _exit_without_prompting(self) -> None:

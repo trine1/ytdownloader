@@ -1,3 +1,18 @@
+ytdownloader (0.4.1-1) bookworm; urgency=medium
+
+  * Root cause of the "title shows, controls vanish at completion" bug
+    found and removed: the row's enabled-state toggling (setEnabled(False)
+    on the progress bar and button when a download completes) triggered
+    Qt/Wayland to composite a frame without those child widgets. Widgets
+    are never enabled/disabled now; terminal rows are greyed with a
+    cascading stylesheet and the pause/done button is a click-guarded
+    no-op.
+  * A one-second watchdog repaints the Downloads viewport synchronously,
+    healing any residual compositor staleness within a second — the
+    controls are guaranteed visible for every row in every state.
+
+ -- User <user@example.com>  Mon, 26 Oct 2026 17:30:00 +0000
+
 ytdownloader (0.4.0-1) bookworm; urgency=medium
 
   * Downloads rows are now persistent widgets: created once per item, then
