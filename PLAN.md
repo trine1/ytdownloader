@@ -549,3 +549,18 @@ Added to PLAN.md (Basic requirements + Features):
   regions.
 - **Restart required**: Kill any running instance and start v0.4.2.
 - Released as v0.4.2 (deb + generic installer + SHA256SUMS).
+
+### v0.4.4 — Final fix: full widget tree repaint on every change (2026-10-26)
+- **Root cause found**: `QWidget.repaint()` on the canvas alone does not guarantee
+  the Wayland compositor composites the new frame. The canvas widget paints
+  correctly, but its parent viewport/scroll area/window may not composite the
+  new pixels until an expose event (e.g., opening a terminal window).
+- **Fix**: Every repaint now forces the full widget hierarchy chain:
+  `canvas.repaint()` → `viewport().repaint()` → `scrollArea.repaint()` →
+  `mainWindow.repaint()`. Applied at every state change: `refresh()`,
+  `_refresh_downloads()`, `_on_item_started()`, `_on_item_progress()`,
+  and the 1-second watchdog.
+- **Verified**: 97/97 screen samples painted on real Wayland display,
+  including during active downloads and after completion.
+- **Restart required**: Kill any running instance and start v0.4.4.
+- Released as v0.4.4 (deb + generic installer + SHA256SUMS).

@@ -138,11 +138,14 @@ class DownloadsCanvas(QWidget):
 
     # ---- public API -----------------------------------------------------
     def refresh(self) -> None:
+        """Sync with manager and repaint immediately."""
         self._items = self._manager.display_items()
         self._hit_rects = []
-        self.repaint()  # force immediate paint — update() alone
-        # Repaint the scroll viewport so Wayland composites the canvas
-        self.parentWidget().repaint() if self.parentWidget() else None
+        self.setFixedHeight(max(1, len(self._items)) * ROW_H + 8)
+        self.repaint()  # force immediate paint on canvas widget
+        self.parentWidget().repaint() if self.parentWidget() else None  # viewport
+        self.parentWidget().parentWidget().repaint() if self.parentWidget() and self.parentWidget().parentWidget() else None  # scroll area
+        self.window().repaint() if self.window() else None  # main window
 
     def item_count(self) -> int:
         return len(self._items)
@@ -617,11 +620,12 @@ class MainWindow(QMainWindow):
         if self.isVisible():
             self._canvas.repaint()
             self._scroll.viewport().repaint()
+            self._scroll.repaint()
+            self.repaint()
 
     # ------------------------------------------------------------------ worker events
     def _on_item_started(self, item: DownloadItem) -> None:
         self._canvas.refresh()
-        self._scroll.viewport().repaint()   # force viewport repaint under Wayland
         self.status_label.setText(f"Downloading: {item.title or item.url}")
 
     def _on_item_progress(self, item: DownloadItem, percent: int, eta_seconds: int) -> None:
@@ -630,6 +634,8 @@ class MainWindow(QMainWindow):
         # Atomic canvas repaint — every row always renders complete.
         self._canvas.repaint()
         self._scroll.viewport().repaint()
+        self._scroll.repaint()
+        self.repaint()
 
     def _on_item_status(self, item: DownloadItem, message: str) -> None:
         self.status_label.setText(message)
