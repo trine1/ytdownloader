@@ -586,3 +586,11 @@ Added to PLAN.md (Basic requirements + Features):
   regions.
 - **Restart required**: Kill any running instance and start v0.4.2.
 - Released as v0.4.4 (deb + generic installer + SHA256SUMS).
+
+### v0.4.5 — Simplified canvas: no per-row buttons (2026-10-26)
+- Removed per-row pause/resume and ✕ buttons from the Downloads canvas.
+- Each row now shows: title, progress bar with %, ETA only.
+- Pause/resume is handled via the global "Pause downloads" button below.
+- Removal of completed/failed items is handled via "Clear downloaded".
+- Simpler layout: label takes remaining space, progress bar and ETA on right.
+- Released as v0.4.5 (deb + generic installer + SHA256SUMS).

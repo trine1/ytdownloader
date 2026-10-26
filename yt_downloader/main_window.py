@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from typing import Dict, List, Optional
 
-from PyQt6.QtCore import QPoint, QRect, QSize, QTimer, Qt, pyqtSignal
+from PyQt6.QtCore import QPoint, QRect, QSize, QTimer, Qt
 from PyQt6.QtGui import QColor, QPainter, QPen
 from PyQt6.QtWidgets import (
     QApplication,
@@ -38,9 +38,6 @@ ROW_H = 44          # logical px per row
 PAD = 8             # left/right padding
 BAR_W = 170         # progress bar width
 ETA_W = 90          # ETA text width
-BTN_W = 86          # pause/resume button width
-X_W = 30            # remove button width
-ROW_TOP = 4         # top margin inside row
 
 
 def _row_state(item: DownloadItem, manager: DownloadManager) -> str:
@@ -105,34 +102,22 @@ def _row_eta(item: DownloadItem, manager: DownloadManager) -> str:
     return f"ETA: {format_seconds(last_eta)}" if last_eta is not None else "ETA: --:--"
 
 
-def _btn_text(item: DownloadItem, manager: DownloadManager) -> str:
-    state = _row_state(item, manager)
-    if state == "completed":
-        return "Done"
-    if state == "failed":
-        return "Stopped"
-    if state == "paused":
-        return "Resume"
-    return "Pause"
-
-
 class DownloadsCanvas(QWidget):
     """Single widget that draws ALL download rows in ONE paint pass.
 
-    There are NO per-row child widgets — everything (label, progress bar,
-    ETA, pause/resume button, ✕) is drawn with QPainter in one pass.
-    This guarantees that under Wayland the compositor always sees a
-    complete frame: every row has its progress bar and buttons, always.
-    """
+    Every row — title, progress bar, percent, ETA — is drawn in one
+    atomic pass. No per-row buttons: pause/resume happens via the
+    dedicated 'Pause downloads' button below; removal is not supported
+    via the canvas (completed/failed items are removed via 'Clear downloaded').
 
-    action = pyqtSignal(object, str)   # item, 'toggle' | 'remove'
+    No child widgets are involved, so Qt/Wayland cannot drop individual
+    controls from the frame.
+    """
 
     def __init__(self, manager: DownloadManager, parent=None) -> None:
         super().__init__(parent)
         self._manager = manager
         self._items: List[DownloadItem] = []
-        self._hit_rects: list[tuple[DownloadItem, str, QRect]] = []
-        self._press_pos: Optional[QPoint] = None
         self.setMinimumHeight(ROW_H + 2 * PAD)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
@@ -140,12 +125,11 @@ class DownloadsCanvas(QWidget):
     def refresh(self) -> None:
         """Sync with manager and repaint immediately."""
         self._items = self._manager.display_items()
-        self._hit_rects = []
         self.setFixedHeight(max(1, len(self._items)) * ROW_H + 8)
-        self.repaint()  # force immediate paint on canvas widget
-        self.parentWidget().repaint() if self.parentWidget() else None  # viewport
-        self.parentWidget().parentWidget().repaint() if self.parentWidget() and self.parentWidget().parentWidget() else None  # scroll area
-        self.window().repaint() if self.window() else None  # main window
+        self.repaint()  # force immediate paint — update() alone
+        # Repaint the parent viewport so Wayland composites the canvas
+        if self.parentWidget():
+            self.parentWidget().repaint()
 
     def item_count(self) -> int:
         return len(self._items)
@@ -168,17 +152,13 @@ class DownloadsCanvas(QWidget):
             return
 
         width = self.width()
-        x_x = width - PAD - X_W
-        x_btn = x_x - 6 - BTN_W
-        x_eta = x_btn - 8 - ETA_W
-        x_bar = x_eta - 8 - BAR_W
-        label_w = max(40, x_bar - 10 - PAD)
-
-        self._hit_rects = []
+        x_bar = width - PAD - BAR_W
+        x_eta = x_bar - 8 - ETA_W
+        label_w = max(40, x_eta - 10 - PAD)
 
         for i, item in enumerate(self._items):
             y = i * ROW_H + PAD
-            self._paint_row(p, item, y, width, x_bar, x_eta, x_btn, x_x, label_w)
+            self._paint_row(p, item, y, width, x_bar, x_eta, label_w)
 
         p.end()
 
@@ -190,8 +170,6 @@ class DownloadsCanvas(QWidget):
         width: int,
         x_bar: int,
         x_eta: int,
-        x_btn: int,
-        x_x: int,
         label_w: int,
     ) -> None:
         mgr = self._manager
@@ -234,47 +212,6 @@ class DownloadsCanvas(QWidget):
         p.setPen(pal.color(pal.ColorRole.WindowText))
         p.drawText(QRect(x_eta, y, ETA_W, 28), Qt.AlignmentFlag.AlignVCenter,
                    _row_eta(item, mgr))
-
-        # ---- pause/resume/done button ----------------------------------
-        btn = QRect(x_btn, y, BTN_W, 28)
-        p.setBrush(pal.color(pal.ColorRole.Button))
-        p.setPen(QPen(pal.color(pal.ColorRole.Mid), 1))
-        p.drawRoundedRect(btn, 4, 4)
-        if state in ('completed', 'failed'):
-            p.setPen(pal.color(pal.ColorRole.PlaceholderText))
-        else:
-            p.setPen(pal.color(pal.ColorRole.ButtonText))
-        p.drawText(btn, Qt.AlignmentFlag.AlignCenter, _btn_text(item, mgr))
-
-        # ---- ✕ button --------------------------------------------------
-        xb = QRect(x_x, y, X_W, 28)
-        p.setBrush(pal.color(pal.ColorRole.Button))
-        p.setPen(QPen(pal.color(pal.ColorRole.Mid), 1))
-        p.drawRoundedRect(xb, 4, 4)
-        p.setPen(pal.color(pal.ColorRole.ButtonText))
-        p.drawText(xb, Qt.AlignmentFlag.AlignCenter, '✕')
-
-        # ---- hit rects -------------------------------------------------
-        if state not in ('completed', 'failed'):
-            self._hit_rects.append((item, 'toggle', btn))
-        self._hit_rects.append((item, 'remove', xb))
-
-    # ---- interaction -----------------------------------------------------
-    def mousePressEvent(self, event) -> None:
-        self._press_pos = event.position().toPoint()
-
-    def mouseReleaseEvent(self, event) -> None:
-        pos = event.position().toPoint()
-        pressed = self._press_pos
-        self._press_pos = None
-        if pressed is None:
-            return
-        if (pos - pressed).manhattanLength() > 8:
-            return  # drag, not click
-        for item, action, rect in self._hit_rects:
-            if rect.contains(pos):
-                self.action.emit(item, action)
-                return
 
 
 class MainWindow(QMainWindow):
@@ -433,8 +370,6 @@ class MainWindow(QMainWindow):
         self.pause_all_btn.clicked.connect(self._on_pause_all)
         self.clear_btn.clicked.connect(self._on_clear_clicked)
 
-        self._canvas.action.connect(self._on_canvas_action)
-
         self._manager.item_validated.connect(self._on_validated)
         self._manager.item_started.connect(self._on_item_started)
         self._manager.item_progress.connect(self._on_item_progress)
@@ -582,25 +517,6 @@ class MainWindow(QMainWindow):
         self._manager.clear_downloaded()
         self.status_label.setText("Completed and failed items cleared")
 
-    def _on_canvas_action(self, item: DownloadItem, action: str) -> None:
-        if action == 'toggle':
-            if _row_state(item, self._manager) in ('completed', 'failed'):
-                return
-            if item.paused:
-                self._manager.resume_item(item)
-            else:
-                self._manager.pause_item(item)
-        elif action == 'remove':
-            if item in self._manager.completed_items() or item in self._manager.failed_items():
-                self._manager.remove_completed(item)
-                return
-            items = self._manager.queue_items()
-            for i, it in enumerate(items):
-                if it is item:
-                    self._manager.remove_queued(i)
-                    return
-            self._manager.remove_active(item)
-
     # ------------------------------------------------------------------ canvas refresh
     def _refresh_downloads(self) -> None:
         """One atomic canvas repaint — every row, every control, every time."""
@@ -626,6 +542,7 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ worker events
     def _on_item_started(self, item: DownloadItem) -> None:
         self._canvas.refresh()
+        self._scroll.viewport().repaint()   # force viewport repaint under Wayland
         self.status_label.setText(f"Downloading: {item.title or item.url}")
 
     def _on_item_progress(self, item: DownloadItem, percent: int, eta_seconds: int) -> None:
@@ -659,6 +576,7 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------ state persistence
     def _save_state(self) -> None:
+        """Persist current settings, queue, active downloads."""
         if self._closing:
             return
         save_state(
@@ -668,6 +586,7 @@ class MainWindow(QMainWindow):
         )
 
     def _load_state(self) -> None:
+        """Restore settings, queue, and active downloads from the state file."""
         payload = load_state()
         if payload is None:
             self._state_save_timer.start()
@@ -682,6 +601,7 @@ class MainWindow(QMainWindow):
 
         queue_items = [_item_from_dict(d) for d in payload.get("queue", [])]
         active_items = [_item_from_dict(d) for d in payload.get("active", [])]
+        # Completed downloads are intentionally NOT restored.
         self._manager.restore(self._settings, queue_items, active_items)
 
         self._refresh_downloads()
@@ -692,6 +612,7 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------ exit
     def _exit_without_prompting(self) -> None:
+        """Quit immediately (no prompt) — state is saved for auto-resume."""
         self._force_quit = True
         self.close()
 
@@ -703,7 +624,7 @@ class MainWindow(QMainWindow):
             f"A Qt graphical YouTube downloader powered by yt-dlp.",
         )
 
-    def closeEvent(self, event) -> None:
+    def closeEvent(self, event) -> None:  # noqa: N802 - Qt override name
         self._save_state()
         if self._force_quit or not self._manager.active_items():
             self._closing = True
