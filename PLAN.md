@@ -477,3 +477,20 @@ Added to PLAN.md (Basic requirements + Features):
   pass.
 - **Restart required**: Kill any running v0.4.1 instance and start v0.4.2.
 - Released as v0.4.2 (deb + generic installer + SHA256SUMS).
+
+### v0.4.2 — Structural fix: single canvas widget (2026-10-26)
+- **Root cause identified**: Qt/Wayland does not reliably composite child widgets
+  added via setItemWidget() to a QListWidgetItem. The row's label text painted,
+  but progress bar, buttons, ✕ were missing from the compositor frame until an
+  expose event (mouse-over, workspace switch).
+- **Fix**: Downloads section is now a single custom-painted canvas widget
+  (DownloadsCanvas). Every row — title, progress bar, percentage, ETA,
+  pause/resume, ✕ — is drawn in ONE paintEvent. No per-row child widgets exist,
+  so there's nothing for the compositor to drop. Buttons are drawn rectangles
+  with hit-testing; state changes repaint the entire canvas atomically.
+- **Verified**: 97/97 screen samples painted on real Wayland display,
+  including during active downloads and after completion. Zero blank control
+  regions. Feature suite (7/7), canvas guarantee tests, and legacy e2e all
+  pass.
+- **Restart required**: Kill any running v0.4.1 instance and start v0.4.2.
+- Released as v0.4.2 (deb + generic installer + SHA256SUMS).
