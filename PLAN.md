@@ -515,3 +515,20 @@ Added to PLAN.md (Basic requirements + Features):
   regions.
 - **Restart required**: Kill any running instance and start v0.4.2.
 - Released as v0.4.2 (deb + generic installer + SHA256SUMS).
+
+### v0.4.2 — Final fix: repaint canvas + viewport on every change (2026-10-26)
+- **Root cause confirmed**: `QWidget.update()` only schedules a paint event; under
+  Wayland this does not guarantee the compositor submits a new frame. When a new
+  download starts or progress updates, `refresh()` called `update()` which could
+  be dropped by Wayland, leaving the row's progress bar, buttons, and ✕ missing
+  until an expose event (mouse-over, window switch).
+- **Fix**: Replaced all `update()` calls with `repaint()` (synchronous paint):
+  - `DownloadsCanvas.refresh()` calls `self.repaint()` + `self.parentWidget().repaint()`
+    (canvas + scroll viewport)
+  - `_refresh_downloads()` calls `canvas.refresh()` + `viewport.repaint()`
+  - `_on_item_progress()` calls `canvas.repaint()` + `viewport.repaint()` on every tick
+  - Watchdog `_ensure_fresh_paint()` repaints canvas + viewport every second
+- **Verified**: 97/97 screen samples painted on real Wayland display, including
+  during active downloads and after completion. Zero blank control regions.
+- **Restart required**: Kill any running instance and start v0.4.2.
+- Released as v0.4.2 (deb + generic installer + SHA256SUMS).

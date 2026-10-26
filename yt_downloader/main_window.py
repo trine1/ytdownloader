@@ -141,6 +141,8 @@ class DownloadsCanvas(QWidget):
         self._items = self._manager.display_items()
         self._hit_rects = []
         self.repaint()  # force immediate paint — update() alone
+        # Repaint the scroll viewport so Wayland composites the canvas
+        self.parentWidget().repaint() if self.parentWidget() else None
 
     def item_count(self) -> int:
         return len(self._items)
@@ -619,6 +621,7 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ worker events
     def _on_item_started(self, item: DownloadItem) -> None:
         self._canvas.refresh()
+        self._scroll.viewport().repaint()   # force viewport repaint under Wayland
         self.status_label.setText(f"Downloading: {item.title or item.url}")
 
     def _on_item_progress(self, item: DownloadItem, percent: int, eta_seconds: int) -> None:
