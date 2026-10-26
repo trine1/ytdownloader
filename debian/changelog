@@ -1,3 +1,20 @@
+ytdownloader (0.4.3-1) bookworm; urgency=medium
+
+  * Fix Downloads row controls disappearing under Wayland: replaced
+    QWidget.update() (which only schedules a paint event) with
+    QWidget.repaint() (which forces immediate synchronous painting) on
+    the canvas widget and its scroll area viewport. Under Wayland,
+    update() does not reliably result in a new compositor frame, so the
+    row's label could show while progress bar, buttons, and ✕ remained
+    blank until an expose event (e.g. opening a terminal window).
+  * Every state change now triggers an immediate repaint of the canvas
+    and its scroll area viewport: validation, queue changes, progress
+    ticks, completion, and pause/resume actions.
+  * Watchdog repaints the full canvas every second as a backstop.
+  * Released as v0.4.2. Restart ytdownloader to load the new build.
+
+ -- User <user@example.com>  Mon, 26 Oct 2026 20:30:00 +0000
+
 ytdownloader (0.4.2-1) bookworm; urgency=medium
 
   * Fix Downloads rows showing title but no controls under Wayland:

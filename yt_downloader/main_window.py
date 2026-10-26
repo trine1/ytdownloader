@@ -138,10 +138,9 @@ class DownloadsCanvas(QWidget):
 
     # ---- public API -----------------------------------------------------
     def refresh(self) -> None:
-        """Sync with manager and schedule one atomic repaint."""
         self._items = self._manager.display_items()
         self._hit_rects = []
-        self.update()
+        self.repaint()  # force immediate paint — update() alone
 
     def item_count(self) -> int:
         return len(self._items)
@@ -601,6 +600,7 @@ class MainWindow(QMainWindow):
     def _refresh_downloads(self) -> None:
         """One atomic canvas repaint — every row, every control, every time."""
         self._canvas.refresh()
+        self._scroll.viewport().repaint()   # repaint viewport so canvas shows
         self._sync_pause_button()
 
     def _sync_pause_button(self) -> None:
@@ -613,7 +613,8 @@ class MainWindow(QMainWindow):
         """Watchdog: repaint the canvas every second to guarantee controls
         are always visible, even under Wayland compositor quirks."""
         if self.isVisible():
-            self._canvas.update()
+            self._canvas.repaint()
+            self._scroll.viewport().repaint()
 
     # ------------------------------------------------------------------ worker events
     def _on_item_started(self, item: DownloadItem) -> None:
@@ -624,7 +625,8 @@ class MainWindow(QMainWindow):
         setattr(item, "last_pct", percent)
         setattr(item, "last_eta", eta_seconds)
         # Atomic canvas repaint — every row always renders complete.
-        self._canvas.update()
+        self._canvas.repaint()
+        self._scroll.viewport().repaint()
 
     def _on_item_status(self, item: DownloadItem, message: str) -> None:
         self.status_label.setText(message)

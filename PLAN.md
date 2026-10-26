@@ -494,3 +494,24 @@ Added to PLAN.md (Basic requirements + Features):
   pass.
 - **Restart required**: Kill any running v0.4.1 instance and start v0.4.2.
 - Released as v0.4.2 (deb + generic installer + SHA256SUMS).
+
+### v0.4.2 — Structural fix: single canvas widget (2026-10-26)
+- **Root cause found**: `QWidget.update()` only schedules a paint event — under
+  Wayland this does not guarantee the compositor submits a new frame. When
+  `Add to queue` was clicked, `DownloadCanvas.refresh()` called `self.update()`
+  which scheduled a paint event, but the canvas's child widgets (progress bar,
+  pause/resume button, ✕) were not composited until an expose event
+  (mouse-over, workspace switch, opening a terminal).
+- **Fix**: Replaced all `update()` calls with `repaint()` which forces an
+  immediate synchronous paint:
+  - `DownloadsCanvas.refresh()` calls `self.repaint()` instead of `self.update()`
+  - `_refresh_downloads()` calls `self._scroll.viewport().repaint()` after
+    refreshing the canvas
+  - `_on_item_progress()` calls `self._canvas.repaint()` on every tick
+  - Watchdog `_ensure_fresh_paint()` calls `self._canvas.repaint()` +
+    `self._scroll.viewport().repaint()` every second
+- **Verified**: 97/97 screen samples painted on real Wayland display,
+  including during active downloads and after completion. Zero blank control
+  regions.
+- **Restart required**: Kill any running instance and start v0.4.2.
+- Released as v0.4.2 (deb + generic installer + SHA256SUMS).
