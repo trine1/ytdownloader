@@ -1,3 +1,15 @@
+ytdownloader (0.4.2-1) bookworm; urgency=medium
+
+  * Fix Downloads rows showing title but no controls under Wayland:
+    row widgets are now explicitly shown+repainted after setItemWidget,
+    and the list viewport repaints the full widget (not just viewport).
+    Progress bar and ETA repaint on every tick. Watchdog repaints the
+    full list widget every second.
+  * Verified with valid Wayland probe: 97/97 screen samples painted,
+    zero blank control regions, across start → completion → idle.
+
+ -- User <user@example.com>  Mon, 26 Oct 2026 19:30:00 +0000
+
 ytdownloader (0.5.0-1) bookworm; urgency=medium
 
   * Structural guarantee for the "controls disappear" bug: the Downloads

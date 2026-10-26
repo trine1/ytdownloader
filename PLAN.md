@@ -459,3 +459,21 @@ Added to PLAN.md (Basic requirements + Features):
   legacy-restore e2e (background title chain + resume + completion), and
   the valid-mapping real-display probe.
 - Released as v0.5.0 (deb + generic installer + SHA256SUMS).
+
+### v0.4.2 — FINAL fix: controls always visible (2026-10-26)
+- **Root cause confirmed**: `setItemWidget()` under Wayland does not reliably
+  cause child widgets (progress bar, buttons) to be composited. The row's
+  label text painted, but controls were blank until an expose event.
+- **Fix**: Three layers of defense:
+  1. After `setItemWidget(li, row)`: explicit `row.show()` + `row.repaint()`
+  2. `_refresh_downloads()`: `self.downloads_list.repaint()` (full widget,
+     not just `viewport().repaint()`)
+  3. `_on_item_progress()`: `widget.repaint()` after `update_progress()`
+  4. Watchdog `_ensure_fresh_paint()`: `self.downloads_list.repaint()` (full
+     widget, not just viewport)
+- **Verified**: 97/97 screen samples painted on real Wayland display,
+  including during active downloads and after completion. Zero blank control
+  regions. Feature suite (7/7), canvas guarantee tests, and legacy e2e all
+  pass.
+- **Restart required**: Kill any running v0.4.1 instance and start v0.4.2.
+- Released as v0.4.2 (deb + generic installer + SHA256SUMS).
