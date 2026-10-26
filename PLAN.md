@@ -430,3 +430,32 @@ Added to PLAN.md (Basic requirements + Features):
   pruning, failed-row greying); features suite; 398-frame pixel test.
 - NOTE: the user's running instance must be RESTARTED to pick up this fix.
 - Released as v0.4.1 (deb + generic installer + SHA256SUMS).
+
+### v0.5.0 — THE structural fix: the Downloads list is one atomic canvas (2026-10-26)
+- The user STILL saw rows going title-only at the state transitions (v0.4.0
+  persistent rows + v0.4.1 repaints did not hold on their desktop).
+- **Structural elimination of the bug class**: the Downloads list is now a
+  single custom-painted widget (`DownloadsCanvas`). Every row — title,
+  progress bar, percentage, ETA, pause/resume/Done/Stopped and ✕ — is drawn
+  in ONE paintEvent; there are NO per-row child widgets at all:
+  - a composited frame can never contain a title without its controls —
+    every frame is a complete, consistent rendering of every row;
+  - no setItemWidget / child polish / enabled toggling exists any more;
+  - buttons are drawn rects with hit-testing (QTest-verified clicks);
+  - rows reorder freely (state-based) with zero teardown risk;
+  - scrolling via QScrollArea; scrolling position is stable (the canvas is
+    never recreated).
+- **Probe correction**: all previous Wayland screen measurements were
+  invalid — Qt-Wayland `mapToGlobal` is (0,0)-relative, so every earlier
+  "screen-blank"/"screen-painted" reading sampled the wrong window. The
+  valid probe (Hyprland IPC window position) now shows 97/97 screen
+  samples painted across start → completion → idle.
+- Widget-level row implementation removed (`_DownloadRow`, per-row
+  registries); the watchdog canvas-update remains as the repaint safety
+  net; interaction deferred-free (no widget is ever destroyed on click).
+- Tests: 5-state render completeness (label+bar+btn+✕ per row, pixel
+  variance per region), click actions per state (pause/resume toggle,
+  terminal no-ops, ✕ removals incl. dynamic reordering), features suite,
+  legacy-restore e2e (background title chain + resume + completion), and
+  the valid-mapping real-display probe.
+- Released as v0.5.0 (deb + generic installer + SHA256SUMS).

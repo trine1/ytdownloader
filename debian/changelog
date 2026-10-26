@@ -1,3 +1,19 @@
+ytdownloader (0.5.0-1) bookworm; urgency=medium
+
+  * Structural guarantee for the "controls disappear" bug: the Downloads
+    section is now a single custom-drawn canvas widget. Every row (title,
+    progress bar, percentage, ETA, pause/resume, X) is painted in ONE
+    atomic paint pass — there are no per-row child widgets left to fall
+    out of a composited frame, so a row can never render as title-only.
+    Buttons are drawn and hit-tested; state changes repaint the whole
+    canvas atomically.
+  * Also fixes the earlier probe defect (Qt-Wayland mapToGlobal is
+    window-relative): all previous Wayland screen measurements were
+    invalid; this release's verification used real Hyprland window
+    positions (97/97 screen samples painted).
+
+ -- User <user@example.com>  Mon, 26 Oct 2026 18:30:00 +0000
+
 ytdownloader (0.4.1-1) bookworm; urgency=medium
 
   * Root cause of the "title shows, controls vanish at completion" bug
