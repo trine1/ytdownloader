@@ -125,10 +125,6 @@ class DownloadsCanvas(QWidget):
     def refresh(self) -> None:
         """Sync with manager and repaint immediately."""
         self._items = self._manager.display_items()
-        # Match canvas width to viewport width so controls don't shift
-        if self.parentWidget():
-            vp = self.parentWidget()
-            self.setFixedWidth(vp.width())
         self.setFixedHeight(max(1, len(self._items)) * ROW_H + 8)
         # Force layout recalculation before repainting
         if self.parentWidget():
@@ -347,7 +343,7 @@ class MainWindow(QMainWindow):
         self._scroll.setWidget(self._canvas)
         self._scroll.setMinimumHeight(300)
         # Keep canvas width synced with viewport on resize
-        self._scroll.viewport().installEventFilter(self)
+        pass
         downloads_layout.addWidget(self._scroll)
         layout.addWidget(downloads)
 
@@ -530,7 +526,6 @@ class MainWindow(QMainWindow):
     def _refresh_downloads(self) -> None:
         """One atomic canvas repaint — every row, every control, every time."""
         from PyQt6.QtWidgets import QApplication
-        self._canvas.setFixedWidth(self._scroll.viewport().width())
         self._canvas.refresh()
         QApplication.processEvents()
         self._scroll.viewport().repaint()
@@ -545,19 +540,11 @@ class MainWindow(QMainWindow):
         elif not self._manager._paused_items:
             self.pause_all_btn.setText("Pause downloads")
 
-    def eventFilter(self, obj, event) -> bool:
-        from PyQt6.QtCore import QEvent
-        if obj is self._scroll.viewport() and event.type() == QEvent.Type.Resize:
-            self._canvas.setFixedWidth(self._scroll.viewport().width())
-            self._canvas.repaint()
-        return super().eventFilter(obj, event)
-
     def _ensure_fresh_paint(self) -> None:
         """Watchdog: repaint the canvas every second to guarantee controls
         are always visible, even under Wayland compositor quirks."""
         from PyQt6.QtWidgets import QApplication
         if self.isVisible():
-            self._canvas.setFixedWidth(self._scroll.viewport().width())
             self._canvas.repaint()
             QApplication.processEvents()
             self._scroll.viewport().repaint()
@@ -568,18 +555,26 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ worker events
     def _on_item_started(self, item: DownloadItem) -> None:
         from PyQt6.QtWidgets import QApplication
-        self._canvas.setFixedWidth(self._scroll.viewport().width())
+        # Don't set fixed width — let scroll area manage it
         self._canvas.refresh()
+        from PyQt6.QtWidgets import QApplication
         QApplication.processEvents()
         self._scroll.viewport().repaint()
         self._scroll.repaint()
         self.repaint()
         QApplication.processEvents()
         # Force Wayland compositor to submit a new frame
+        wh = self.windowHandle()
+        if wh is not None:
+            wh.requestUpdate()
+        QApplication.processEvents()
         sz = self.size()
         self.resize(sz.width() + 1, sz.height())
         QApplication.processEvents()
         self.resize(sz.width(), sz.height())
+        QApplication.processEvents()
+        if wh is not None:
+            wh.requestUpdate()
         QApplication.processEvents()
         self.status_label.setText(f"Downloading: {item.title or item.url}")
 
@@ -587,8 +582,6 @@ class MainWindow(QMainWindow):
         setattr(item, "last_pct", percent)
         setattr(item, "last_eta", eta_seconds)
         from PyQt6.QtWidgets import QApplication
-        # Keep canvas width synced with viewport
-        self._canvas.setFixedWidth(self._scroll.viewport().width())
         # Atomic canvas repaint — every row always renders complete.
         self._canvas.repaint()
         QApplication.processEvents()
