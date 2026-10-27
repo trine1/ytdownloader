@@ -134,6 +134,12 @@ class DownloadsCanvas(QWidget):
     def item_count(self) -> int:
         return len(self._items)
 
+    def update_item(self, item: DownloadItem) -> None:
+        """Light update: refresh just one row's widgets (progress path)."""
+        row = self._rows.get(id(item))
+        if row is not None:
+            self._update_row(item, row)
+
     # ---- row management --------------------------------------------------
     def _sync_rows(self) -> None:
         """Create new rows, update existing rows, remove stale rows."""
@@ -166,9 +172,14 @@ class DownloadsCanvas(QWidget):
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(8)
 
-        # Title label (stretched to fill remaining space)
+        # Title label (stretched to fill remaining space).
+        # Ignored horizontal policy is critical: a QLabel's minimum width
+        # is normally its FULL text width, which would blow the row's
+        # minimum width past the scroll viewport and push the progress
+        # bar out of view. Ignored lets the row shrink to viewport width.
         title = QLabel()
-        title.setMinimumWidth(100)
+        title.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        title.setMinimumWidth(40)
         layout.addWidget(title, stretch=1)
 
         # Progress bar (fixed width)
@@ -191,7 +202,19 @@ class DownloadsCanvas(QWidget):
         row._title = title   # type: ignore[attr-defined]
         row._bar = bar       # type: ignore[attr-defined]
         row._eta = eta       # type: ignore[attr-defined]
+        # Re-elide whenever the label gets its real width after layout
+        title.installEventFilter(self)
         return row
+
+    def eventFilter(self, obj, event) -> bool:
+        from PyQt6.QtCore import QEvent
+        if isinstance(obj, QLabel) and event.type() == QEvent.Type.Resize:
+            row = obj.parentWidget()
+            caption = getattr(row, "_caption", None) if row is not None else None
+            if caption:
+                obj.setText(self._elide(obj, caption))
+                return False
+        return super().eventFilter(obj, event)
 
     def _update_row(self, item: DownloadItem, row: QWidget) -> None:
         """Refresh a row's widgets with the item's current state."""
@@ -200,8 +223,12 @@ class DownloadsCanvas(QWidget):
         eta_text = _row_eta(item, self._manager)
         caption = _caption(item, self._manager)
 
-        # Title
-        row._title.setText(caption)  # type: ignore[attr-defined]
+        # Store caption so resize can re-elide
+        row._caption = caption  # type: ignore[attr-defined]
+
+        # Title — elide to current label width so long titles never force
+        # the row wider than the visible canvas
+        row._title.setText(self._elide(row._title, caption))  # type: ignore[attr-defined]
         row._title.setToolTip(item.url)  # type: ignore[attr-defined]
 
         # Title colour by state
@@ -219,6 +246,25 @@ class DownloadsCanvas(QWidget):
 
         # ETA
         row._eta.setText(eta_text)  # type: ignore[attr-defined]
+
+    @staticmethod
+    def _elide(label: QLabel, text: str) -> str:
+        w = label.width()
+        if w <= 20:
+            return text
+        return label.fontMetrics().elidedText(
+            text, Qt.TextElideMode.ElideRight, w - 4
+        )
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 - Qt override name
+        super().resizeEvent(event)
+        # Re-elide titles with the new width
+        for item in self._items:
+            row = self._rows.get(id(item))
+            if row is not None:
+                caption = getattr(row, "_caption", None)
+                if caption:
+                    row._title.setText(self._elide(row._title, caption))  # type: ignore[attr-defined]
 
 
 class MainWindow(QMainWindow):
@@ -307,6 +353,12 @@ class MainWindow(QMainWindow):
         self.validation_label = QLabel("Enter a URL or ID to validate")
         self.validation_label.setStyleSheet("color: #666; font-style: italic;")
         self.validation_label.setWordWrap(True)
+        # Titles can be very long; never let this label's sizeHint widen
+        # the window (yt-dlp status/title text once grew the top-level
+        # window to 1969px, pushing the progress bar off-screen).
+        self.validation_label.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
+        )
         layout.addWidget(self.validation_label)
 
         # ---- Options ------------------------------------------------------
@@ -369,6 +421,16 @@ class MainWindow(QMainWindow):
 
         self.status_label = QLabel("Ready")
         self.status_label.setStyleSheet("color: #333;")
+        # CRITICAL: this label receives long yt-dlp lines (warnings can be
+        # ~200 chars / 1950px). An unwrapped QLabel's sizeHint is its FULL
+        # text width; Qt's propagateSizeHints then GROWS the top-level
+        # window far beyond the real compositor size, laying content out
+        # off the right edge (progress bar pushed off-screen). Ignored
+        # horizontal policy removes the label from width calculations
+        # entirely. Text is elided to the real width by _set_status().
+        self.status_label.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
+        )
         layout.addWidget(self.status_label)
 
     # ------------------------------------------------------------------ signals
@@ -524,18 +586,12 @@ class MainWindow(QMainWindow):
 
     def _on_clear_clicked(self) -> None:
         self._manager.clear_downloaded()
-        self.status_label.setText("Completed and failed items cleared")
+        self._set_status("Completed and failed items cleared")
 
     # ------------------------------------------------------------------ canvas refresh
     def _refresh_downloads(self) -> None:
         """One atomic canvas repaint — every row, every control, every time."""
-        from PyQt6.QtWidgets import QApplication
         self._canvas.refresh()
-        QApplication.processEvents()
-        self._scroll.viewport().repaint()
-        self._scroll.repaint()
-        self.repaint()
-        QApplication.processEvents()
         self._sync_pause_button()
 
     def _sync_pause_button(self) -> None:
@@ -545,62 +601,42 @@ class MainWindow(QMainWindow):
             self.pause_all_btn.setText("Pause downloads")
 
     def _ensure_fresh_paint(self) -> None:
-        """Watchdog: repaint the canvas every second to guarantee controls
-        are always visible, even under Wayland compositor quirks."""
-        from PyQt6.QtWidgets import QApplication
+        """Watchdog: request a normal paint of the downloads area.
+        With standard Qt widgets, update() is all that is needed —
+        Qt manages frame submission to the Wayland compositor."""
         if self.isVisible():
-            self._canvas.repaint()
-            QApplication.processEvents()
-            self._scroll.viewport().repaint()
-            self._scroll.repaint()
-            self.repaint()
-            QApplication.processEvents()
+            self._canvas.update()
+
+    def _set_status(self, text: str) -> None:
+        """Set status text, elided to the label's real width.
+
+        Long yt-dlp lines (e.g. 200-char warnings) must never inflate the
+        label's sizeHint — combined with the Ignored size policy this
+        guarantees the top-level window can never be grown by text.
+        """
+        w = self.status_label.width()
+        if w > 40:
+            display = self.status_label.fontMetrics().elidedText(
+                text, Qt.TextElideMode.ElideRight, w - 4
+            )
+        else:
+            display = text
+        self.status_label.setToolTip(text)  # full message always in tooltip
+        self.status_label.setText(display)
 
     # ------------------------------------------------------------------ worker events
     def _on_item_started(self, item: DownloadItem) -> None:
-        from PyQt6.QtWidgets import QApplication
-        # Don't set fixed width — let scroll area manage it
         self._canvas.refresh()
-        from PyQt6.QtWidgets import QApplication
-        QApplication.processEvents()
-        self._scroll.viewport().repaint()
-        self._scroll.repaint()
-        self.repaint()
-        QApplication.processEvents()
-        # Aggressive Wayland compositor frame submission
-        wh = self.windowHandle()
-        # Hide and show canvas to force full repaint
-        self._canvas.setVisible(False)
-        QApplication.processEvents()
-        self._canvas.setVisible(True)
-        QApplication.processEvents()
-        if wh is not None:
-            wh.requestUpdate()
-        QApplication.processEvents()
-        sz = self.size()
-        self.resize(sz.width() + 1, sz.height())
-        QApplication.processEvents()
-        self.resize(sz.width(), sz.height())
-        QApplication.processEvents()
-        if wh is not None:
-            wh.requestUpdate()
-        QApplication.processEvents()
-        self.status_label.setText(f"Downloading: {item.title or item.url}")
+        self._set_status(f"Downloading: {item.title or item.url}")
 
     def _on_item_progress(self, item: DownloadItem, percent: int, eta_seconds: int) -> None:
         setattr(item, "last_pct", percent)
         setattr(item, "last_eta", eta_seconds)
-        from PyQt6.QtWidgets import QApplication
-        # Atomic canvas repaint — every row always renders complete.
-        self._canvas.repaint()
-        QApplication.processEvents()
-        self._scroll.viewport().repaint()
-        self._scroll.repaint()
-        self.repaint()
-        QApplication.processEvents()
+        # Widget-based row: push new values into the row's own widgets.
+        self._canvas.update_item(item)
 
     def _on_item_status(self, item: DownloadItem, message: str) -> None:
-        self.status_label.setText(message)
+        self._set_status(message)
 
     def _on_item_finished(
         self, item: DownloadItem, success: bool, message: str, destination: str
@@ -608,13 +644,13 @@ class MainWindow(QMainWindow):
         if success:
             setattr(item, "destination", destination or getattr(item, "destination", ""))
             setattr(item, "last_pct", 100)
-            self.status_label.setText(
+            self._set_status(
                 f"Finished: {item.title or item.url}"
                 + (f" [saved to {destination}]" if destination else "")
             )
         else:
             setattr(item, "fail_message", message)
-            self.status_label.setText(f"FAILED: {item.title or item.url} — {message}")
+            self._set_status(f"FAILED: {item.title or item.url} — {message}")
 
     def _on_item_completed(self, item: DownloadItem, destination: str) -> None:
         self._refresh_downloads()
