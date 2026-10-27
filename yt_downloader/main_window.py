@@ -563,8 +563,13 @@ class MainWindow(QMainWindow):
         self._scroll.repaint()
         self.repaint()
         QApplication.processEvents()
-        # Force Wayland compositor to submit a new frame
+        # Aggressive Wayland compositor frame submission
         wh = self.windowHandle()
+        # Hide and show canvas to force full repaint
+        self._canvas.setVisible(False)
+        QApplication.processEvents()
+        self._canvas.setVisible(True)
+        QApplication.processEvents()
         if wh is not None:
             wh.requestUpdate()
         QApplication.processEvents()
