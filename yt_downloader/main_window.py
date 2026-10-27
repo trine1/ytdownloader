@@ -5,8 +5,7 @@ from __future__ import annotations
 import os
 from typing import Dict, List, Optional
 
-from PyQt6.QtCore import QPoint, QRect, QSize, QTimer, Qt
-from PyQt6.QtGui import QColor, QPainter, QPen
+from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -17,6 +16,7 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QMainWindow,
     QMessageBox,
+    QProgressBar,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -32,12 +32,6 @@ from .worker import DownloadItem, format_seconds
 
 APP_TITLE = "YouTube Downloader"
 DEFAULT_OUTPUT_DIR = os.path.expanduser("~/Downloads")
-
-# Row layout constants
-ROW_H = 44          # logical px per row
-PAD = 8             # left/right padding
-BAR_W = 170         # progress bar width
-ETA_W = 90          # ETA text width
 
 
 def _row_state(item: DownloadItem, manager: DownloadManager) -> str:
@@ -103,118 +97,128 @@ def _row_eta(item: DownloadItem, manager: DownloadManager) -> str:
 
 
 class DownloadsCanvas(QWidget):
-    """Single widget that draws ALL download rows in ONE paint pass.
+    """Scrollable container for download rows using standard Qt widgets.
 
-    Every row — title, progress bar, percent, ETA — is drawn in one
-    atomic pass. No per-row buttons: pause/resume happens via the
-    dedicated 'Pause downloads' button below; removal is not supported
-    via the canvas (completed/failed items are removed via 'Clear downloaded').
+    Each row is a QWidget with QHBoxLayout containing:
+    - QLabel (title, stretched)
+    - QProgressBar (fixed width, shows %)
+    - QLabel (ETA/status, fixed width)
 
-    No child widgets are involved, so Qt/Wayland cannot drop individual
-    controls from the frame.
+    No custom painting — all rendering is handled by Qt's built-in widget
+    system, which works correctly under Wayland compositors.
     """
 
     def __init__(self, manager: DownloadManager, parent=None) -> None:
         super().__init__(parent)
         self._manager = manager
         self._items: List[DownloadItem] = []
-        self.setMinimumHeight(ROW_H + 2 * PAD)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self._rows: Dict[int, QWidget] = {}  # keyed by id(item)
+
+        self._layout = QVBoxLayout(self)
+        self._layout.setContentsMargins(8, 8, 8, 8)
+        self._layout.setSpacing(4)
+        self._layout.addStretch()  # push rows to top
+
+        self.setMinimumHeight(60)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
 
     # ---- public API -----------------------------------------------------
     def refresh(self) -> None:
-        """Sync with manager and repaint immediately."""
+        """Sync with manager and update row widgets."""
         self._items = self._manager.display_items()
-        self.setFixedHeight(max(1, len(self._items)) * ROW_H + 8)
-        # Force layout recalculation before repainting
-        if self.parentWidget():
-            self.parentWidget().updateGeometry()
-        self.repaint()  # force immediate paint — update() alone
-        # Repaint the parent viewport so Wayland composites the canvas
+        self._sync_rows()
+        self.repaint()
         if self.parentWidget():
             self.parentWidget().repaint()
 
     def item_count(self) -> int:
         return len(self._items)
 
-    # ---- painting -------------------------------------------------------
-    def paintEvent(self, event) -> None:
-        """Paint ALL rows in one atomic pass. No child widgets involved,
-        so Qt/Wayland cannot drop individual controls from the frame."""
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    # ---- row management --------------------------------------------------
+    def _sync_rows(self) -> None:
+        """Create new rows, update existing rows, remove stale rows."""
+        current_ids = set()
 
-        rect = self.rect()
-        pal = self.palette()
-        p.fillRect(rect, pal.color(pal.ColorRole.Window))
+        for item in self._items:
+            key = id(item)
+            current_ids.add(key)
 
-        if not self._items:
-            p.setPen(QColor('#888'))
-            p.drawText(rect, Qt.AlignmentFlag.AlignCenter, 'No downloads')
-            p.end()
-            return
+            if key not in self._rows:
+                # Insert before the trailing stretch
+                row = self._create_row(item)
+                self._rows[key] = row
+                self._layout.insertWidget(self._layout.count() - 1, row)
 
-        width = self.width()
-        x_bar = width - PAD - BAR_W
-        x_eta = x_bar - 8 - ETA_W
-        label_w = max(40, x_eta - 10 - PAD)
+            self._update_row(item, self._rows[key])
 
-        for i, item in enumerate(self._items):
-            y = i * ROW_H + PAD
-            self._paint_row(p, item, y, width, x_bar, x_eta, label_w)
+        # Remove rows for items no longer displayed
+        for key in list(self._rows.keys()):
+            if key not in current_ids:
+                row = self._rows.pop(key)
+                self._layout.removeWidget(row)
+                row.deleteLater()
 
-        p.end()
+    def _create_row(self, item: DownloadItem) -> QWidget:
+        """Create a single row widget with title, progress bar, and ETA."""
+        row = QWidget()
+        row.setFixedHeight(36)
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(8)
 
-    def _paint_row(
-        self,
-        p: QPainter,
-        item: DownloadItem,
-        y: int,
-        width: int,
-        x_bar: int,
-        x_eta: int,
-        label_w: int,
-    ) -> None:
-        mgr = self._manager
-        state = _row_state(item, mgr)
-        pal = self.palette()
+        # Title label (stretched to fill remaining space)
+        title = QLabel()
+        title.setMinimumWidth(100)
+        layout.addWidget(title, stretch=1)
 
-        # ---- label -----------------------------------------------------
+        # Progress bar (fixed width)
+        bar = QProgressBar()
+        bar.setFixedWidth(170)
+        bar.setFixedHeight(24)
+        bar.setRange(0, 100)
+        bar.setTextVisible(True)
+        layout.addWidget(bar)
+
+        # ETA / status label (fixed width)
+        eta = QLabel()
+        eta.setFixedWidth(90)
+        eta.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
+        layout.addWidget(eta)
+
+        # Store references on the widget for later updates
+        row._title = title   # type: ignore[attr-defined]
+        row._bar = bar       # type: ignore[attr-defined]
+        row._eta = eta       # type: ignore[attr-defined]
+        return row
+
+    def _update_row(self, item: DownloadItem, row: QWidget) -> None:
+        """Refresh a row's widgets with the item's current state."""
+        state = _row_state(item, self._manager)
+        pct = _row_pct(item, self._manager)
+        eta_text = _row_eta(item, self._manager)
+        caption = _caption(item, self._manager)
+
+        # Title
+        row._title.setText(caption)  # type: ignore[attr-defined]
+        row._title.setToolTip(item.url)  # type: ignore[attr-defined]
+
+        # Title colour by state
         if state == "completed":
-            label_color = QColor('#0a0')
+            row._title.setStyleSheet("color: #0a0;")  # type: ignore[attr-defined]
         elif state == "failed":
-            label_color = QColor('#a00')
+            row._title.setStyleSheet("color: #a00;")  # type: ignore[attr-defined]
         elif state in ("paused", "retrying"):
-            label_color = QColor('#b60')
+            row._title.setStyleSheet("color: #b60;")  # type: ignore[attr-defined]
         else:
-            label_color = pal.color(pal.ColorRole.WindowText)
-        p.setPen(label_color)
-        caption = _caption(item, mgr)
-        elided = p.fontMetrics().elidedText(caption, Qt.TextElideMode.ElideRight, label_w - 6)
-        p.drawText(QRect(PAD, y, label_w, 28), Qt.AlignmentFlag.AlignVCenter, elided)
+            row._title.setStyleSheet("")  # type: ignore[attr-defined]
 
-        # ---- progress bar ----------------------------------------------
-        pct = _row_pct(item, mgr)
-        bar = QRect(x_bar, y, BAR_W, 28)
-        p.setPen(QPen(pal.color(pal.ColorRole.Mid), 1))
-        p.setBrush(pal.color(pal.ColorRole.Button))
-        p.drawRoundedRect(bar, 4, 4)
-        fill_w = int(bar.width() * pct / 100)
-        if fill_w > 2:
-            fill_color = {
-                'completed': QColor('#0a0'),
-                'failed': QColor('#a00'),
-            }.get(state, QColor(pal.color(pal.ColorRole.Highlight)))
-            p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(fill_color)
-            p.drawRoundedRect(bar.adjusted(1, 1, 1 - bar.width() + fill_w, -1), 3, 3)
-        p.setPen(pal.color(pal.ColorRole.WindowText))
-        p.drawText(bar, Qt.AlignmentFlag.AlignCenter, f'{pct}%')
+        # Progress bar
+        row._bar.setValue(pct)  # type: ignore[attr-defined]
 
-        # ---- ETA -------------------------------------------------------
-        p.setPen(pal.color(pal.ColorRole.WindowText))
-        p.drawText(QRect(x_eta, y, ETA_W, 28), Qt.AlignmentFlag.AlignVCenter,
-                   _row_eta(item, mgr))
+        # ETA
+        row._eta.setText(eta_text)  # type: ignore[attr-defined]
 
 
 class MainWindow(QMainWindow):
