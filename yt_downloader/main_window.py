@@ -529,9 +529,14 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ canvas refresh
     def _refresh_downloads(self) -> None:
         """One atomic canvas repaint — every row, every control, every time."""
+        from PyQt6.QtWidgets import QApplication
         self._canvas.setFixedWidth(self._scroll.viewport().width())
         self._canvas.refresh()
-        self._scroll.viewport().repaint()   # repaint viewport so canvas shows
+        QApplication.processEvents()
+        self._scroll.viewport().repaint()
+        self._scroll.repaint()
+        self.repaint()
+        QApplication.processEvents()
         self._sync_pause_button()
 
     def _sync_pause_button(self) -> None:
@@ -550,30 +555,47 @@ class MainWindow(QMainWindow):
     def _ensure_fresh_paint(self) -> None:
         """Watchdog: repaint the canvas every second to guarantee controls
         are always visible, even under Wayland compositor quirks."""
+        from PyQt6.QtWidgets import QApplication
         if self.isVisible():
             self._canvas.setFixedWidth(self._scroll.viewport().width())
             self._canvas.repaint()
+            QApplication.processEvents()
             self._scroll.viewport().repaint()
             self._scroll.repaint()
             self.repaint()
+            QApplication.processEvents()
 
     # ------------------------------------------------------------------ worker events
     def _on_item_started(self, item: DownloadItem) -> None:
+        from PyQt6.QtWidgets import QApplication
         self._canvas.setFixedWidth(self._scroll.viewport().width())
         self._canvas.refresh()
-        self._scroll.viewport().repaint()   # force viewport repaint under Wayland
+        QApplication.processEvents()
+        self._scroll.viewport().repaint()
+        self._scroll.repaint()
+        self.repaint()
+        QApplication.processEvents()
+        # Force Wayland compositor to submit a new frame
+        sz = self.size()
+        self.resize(sz.width() + 1, sz.height())
+        QApplication.processEvents()
+        self.resize(sz.width(), sz.height())
+        QApplication.processEvents()
         self.status_label.setText(f"Downloading: {item.title or item.url}")
 
     def _on_item_progress(self, item: DownloadItem, percent: int, eta_seconds: int) -> None:
         setattr(item, "last_pct", percent)
         setattr(item, "last_eta", eta_seconds)
+        from PyQt6.QtWidgets import QApplication
         # Keep canvas width synced with viewport
         self._canvas.setFixedWidth(self._scroll.viewport().width())
         # Atomic canvas repaint — every row always renders complete.
         self._canvas.repaint()
+        QApplication.processEvents()
         self._scroll.viewport().repaint()
         self._scroll.repaint()
         self.repaint()
+        QApplication.processEvents()
 
     def _on_item_status(self, item: DownloadItem, message: str) -> None:
         self.status_label.setText(message)
