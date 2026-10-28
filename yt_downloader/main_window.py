@@ -60,9 +60,10 @@ def _caption(item: DownloadItem, manager: DownloadManager) -> str:
         ) if s
     )
     if state == "completed":
+        # Completed rows show just the tick and the final file name.
         dest = getattr(item, "destination", "")
-        tail = f" → {os.path.basename(dest)}" if dest else ""
-        return f"✓ Completed: [{item.kind}] {display}{tail}"
+        filename = os.path.basename(dest) if dest else ""
+        return f"✓ {filename}" if filename else f"✓ {display}"
     if state == "failed":
         msg = getattr(item, "fail_message", "") or "download failed"
         return f"✗ FAILED: [{item.kind}] {display} — {msg}"
@@ -228,7 +229,7 @@ class DownloadsCanvas(QWidget):
         """Tell the main window to re-evaluate the global pause button
         and persist the new state."""
         win = self.window()
-        sync = getattr(win, "_sync_pause_button", None)
+        sync = getattr(win, "_sync_controls", None)
         if callable(sync):
             sync()
         save = getattr(win, "_save_state", None)
@@ -280,7 +281,12 @@ class DownloadsCanvas(QWidget):
         # Title — elide to current label width so long titles never force
         # the row wider than the visible canvas
         row._title.setText(self._elide(row._title, caption))  # type: ignore[attr-defined]
-        row._title.setToolTip(item.url)  # type: ignore[attr-defined]
+        # Completed rows show only "✓ filename", so point the tooltip at
+        # the full path; other rows keep the source URL.
+        if state == "completed" and getattr(item, "destination", ""):
+            row._title.setToolTip(item.destination)  # type: ignore[attr-defined]
+        else:
+            row._title.setToolTip(item.url)  # type: ignore[attr-defined]
 
         # Title colour by state
         if state == "completed":
@@ -411,7 +417,7 @@ class MainWindow(QMainWindow):
         src_row.addWidget(QLabel("Source"))
         self.url_input = QLineEdit()
         self.url_input.setPlaceholderText(
-            "YouTube URL or video ID (e.g. dQw4w9WgXcQ); invidious URLs accepted"
+            "YouTube/Invidious URL or video ID (e.g. dQw4w9WgXcQ)"
         )
         src_row.addWidget(self.url_input, stretch=1)
         layout.addLayout(src_row)
@@ -662,13 +668,33 @@ class MainWindow(QMainWindow):
     def _refresh_downloads(self) -> None:
         """One atomic canvas repaint — every row, every control, every time."""
         self._canvas.refresh()
-        self._sync_pause_button()
+        self._sync_controls()
 
-    def _sync_pause_button(self) -> None:
-        if self._has_anything_paused():
-            self.pause_all_btn.setText("Resume all downloads")
-        else:
-            self.pause_all_btn.setText("Pause all downloads")
+    def _sync_controls(self) -> None:
+        """Update the global buttons' labels and enable state.
+
+        - "Pause all downloads" / "Resume all downloads": greyed out when
+          no live download exists (only completed/failed rows left) —
+          there would be nothing to pause or resume.
+        - "Clear downloaded": greyed out when the list holds no
+          completed or failed items to clear.
+        """
+        mgr = self._manager
+        anything_paused = self._has_anything_paused()
+        self.pause_all_btn.setText(
+            "Resume all downloads" if anything_paused else "Pause all downloads"
+        )
+        has_live = bool(
+            mgr.active_items()
+            or mgr.queue_items()
+            or mgr._paused_items
+            or getattr(mgr, "_scheduled_retries", [])
+        )
+        self.pause_all_btn.setEnabled(has_live)
+
+        self.clear_btn.setEnabled(
+            bool(mgr.completed_items() or mgr.failed_items())
+        )
 
     def _ensure_fresh_paint(self) -> None:
         """Watchdog: request a normal paint of the downloads area.
@@ -756,7 +782,7 @@ class MainWindow(QMainWindow):
         self._manager.restore(self._settings, queue_items, active_items)
 
         self._refresh_downloads()
-        self._sync_pause_button()
+        self._sync_controls()
         self._state_save_timer.start()
         self._repaint_watchdog.start()
 

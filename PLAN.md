@@ -630,3 +630,21 @@ Added to PLAN.md (Basic requirements + Features):
 - Verified: 33-check row-button suite, smoke suite, width test, killer
   test, and a real-download Wayland lifecycle probe all pass.
 - Released as v0.5.3 (deb + generic installer + SHA256SUMS).
+
+### v0.5.4 — UI polish: placeholder, completed caption, button enable states (2026-10-28)
+- Source placeholder now reads "YouTube/Invidious URL or video ID (e.g. dQw4w9WgXcQ)".
+- Completed rows show only "✓ filename" (tooltip = full destination path);
+  failed rows unchanged.
+- "Pause all downloads"/"Resume all downloads" is greyed out when no live
+  download exists (only completed/failed rows left) — nothing to pause.
+- "Clear downloaded" is greyed out when there are no completed/failed items.
+- Synced in one place: _sync_pause_button → _sync_controls (called from
+  _refresh_downloads on every queue_changed).
+- manager fixes found while testing:
+  - _start_next emits queue_changed AFTER _launch, so observers never see
+    an item as neither queued nor active (which briefly greyed the buttons
+    at download start).
+  - _retry_later now emits queue_changed (active→retrying transition
+    refreshed rows/buttons; previously it didn't).
+- Tests: new uicheck suite (21 checks) + all previous suites pass.
+- Released as v0.5.4 (deb + generic installer + SHA256SUMS).

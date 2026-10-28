@@ -462,8 +462,11 @@ class DownloadManager(QObject):
                 i += 1
                 continue
             self._queue.pop(i)
-            self.queue_changed.emit()
             self._launch(item, increment_attempts=increment_attempts)
+            # Emit AFTER the launch so observers see the item as live
+            # (emitting while it is neither queued nor active would make
+            # UI enable-state checks briefly see an empty download list).
+            self.queue_changed.emit()
 
     def _launch(self, item: DownloadItem, increment_attempts: bool = True) -> None:
         if increment_attempts and not getattr(item, "resumed_after_pause", False):
@@ -541,6 +544,10 @@ class DownloadManager(QObject):
         if item not in self._scheduled_retries:
             self._scheduled_retries.append(item)
         delay_ms = item.backoff_for_next() * 1000
+        # The item just left the active set for the retry pool: refresh rows
+        # and global button states (an active->retrying transition must not
+        # leave the UI showing a stale "running" row).
+        self.queue_changed.emit()
         self.item_status.emit(
             item,
             f"Attempt {item.attempts}/{item.max_attempts} failed. "
