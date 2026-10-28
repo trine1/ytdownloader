@@ -594,3 +594,39 @@ Added to PLAN.md (Basic requirements + Features):
 - Removal of completed/failed items is handled via "Clear downloaded".
 - Simpler layout: label takes remaining space, progress bar and ETA on right.
 - Released as v0.4.5 (deb + generic installer + SHA256SUMS).
+
+### v0.5.1 — Standard Qt widgets replace the custom-painted canvas (2026-10-27)
+- Replaced QPainter-based DownloadsCanvas with real Qt widgets
+  (QProgressBar, QLabel, QPushButton rows in a QVBoxLayout).
+- Progress updates now push values into row widgets instead of repaints.
+
+### v0.5.2 — Root cause of the disappearing controls (2026-10-27)
+- ROOT CAUSE: a long yt-dlp status line (the ~200-char SABR WARNING,
+  measured at 1951px) set on the unwrapped status QLabel made the window
+  layout totalSizeHint (1969, 590); Qt's propagateSizeHints grew the
+  top-level window to 1969px while the compositor kept 898px, so content
+  was laid out ~1071px wider than the real window and the right-aligned
+  progress bar/ETA fell off-screen. The hint shrank on the next short
+  message but the window never shrank back until a console open forced a
+  compositor reconfigure — which is why that "fixed" it.
+- Fix: status + validation labels get QSizePolicy.Ignored horizontally;
+  status text elided via _set_status() (full text in tooltip); row titles
+  Ignored + elided (eventFilter on label Resize + resizeEvent).
+- Removed all repaint/processEvents/hide-show/1px-resize hacks.
+- Verified: killer-warning injection keeps window at 898 / hint 640;
+  full download lifecycle probe keeps bar position stable.
+
+### v0.5.3 — Per-row pause/resume/cancel buttons (2026-10-28)
+- Each download row now has its own Pause/Resume button and a ✕
+  remove/cancel button (hidden Pause on completed/failed rows, ✕ stays).
+- Global button renamed: "Pause all downloads" / "Resume all downloads"
+  (width 180), and it now tracks global pause state coherently even when
+  a single row is paused independently.
+- manager: add_now() flags new items paused while pause-all is engaged;
+  resume_item() clears the global pause and drops the item from
+  _scheduled_retries; _do_retry() skips items already active (no
+  duplicate launches); new remove_item() removes from every list
+  (active/paused/retrying/queued/completed/failed).
+- Verified: 33-check row-button suite, smoke suite, width test, killer
+  test, and a real-download Wayland lifecycle probe all pass.
+- Released as v0.5.3 (deb + generic installer + SHA256SUMS).

@@ -150,6 +150,10 @@ class DownloadManager(QObject):
     def add_now(self, url: str, kind: str, output_dir: str, title: str = "") -> DownloadItem:
         """Insert *url* at the front of the queue ("Download")."""
         item = self._make_item(url, kind, output_dir, title)
+        # While pause-all is active, a new download joins the paused state
+        # instead of slipping past it (its row then offers "Resume").
+        if self._global_paused:
+            item.paused = True
         self._queue.insert(0, item)
         self.queue_changed.emit()
         self._start_next()
@@ -264,6 +268,31 @@ class DownloadManager(QObject):
             return True
         return False
 
+    def remove_item(self, item: DownloadItem) -> bool:
+        """Remove *item* everywhere it lives: active/paused/retrying, queued,
+        or finished. Used by the per-row ✕ (cancel/remove) button.
+
+        Every list is checked (not just the first hit) so an item that is
+        briefly present in two states can never leave a ghost row behind.
+        """
+        removed = False
+        if self.remove_active(item):
+            removed = True
+        if self.remove_completed(item):
+            removed = True
+        if item in self._scheduled_retries:
+            self._scheduled_retries.remove(item)
+            removed = True
+        for i, it in enumerate(self._queue):
+            if it is item:
+                self.remove_queued(i)
+                removed = True
+                break
+        if removed:
+            item.paused = False
+            self.queue_changed.emit()
+        return removed
+
     def clear_completed(self) -> None:
         """Drop every completed download from the completed list."""
         if self._completed:
@@ -317,6 +346,12 @@ class DownloadManager(QObject):
         item.resumed_after_pause = True   # next launch is not a new attempt
         if item in self._paused_items:
             self._paused_items.remove(item)
+        # A per-row resume is explicit user intent: stop holding retries,
+        # and take the item off the retry timer so _do_retry cannot queue
+        # a duplicate once it fires.
+        self._global_paused = False
+        if item in self._scheduled_retries:
+            self._scheduled_retries.remove(item)
         if item not in self._queue:
             self._queue.insert(0, item)
         self.queue_changed.emit()
@@ -517,6 +552,10 @@ class DownloadManager(QObject):
         if item in self._scheduled_retries:
             self._scheduled_retries.remove(item)
         if self._stop_all:
+            return
+        # Already running again (e.g. per-row Resume beat the retry timer):
+        # never queue a duplicate launch.
+        if any(it is item for it in self._active.values()):
             return
         if self._global_paused:
             item.paused = True   # hold the retry while pause-all is active

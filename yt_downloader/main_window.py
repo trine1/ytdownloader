@@ -198,13 +198,61 @@ class DownloadsCanvas(QWidget):
         )
         layout.addWidget(eta)
 
+        # Per-row Pause/Resume button
+        pause_btn = QPushButton("Pause")
+        pause_btn.setFixedWidth(78)
+        pause_btn.setFixedHeight(26)
+        pause_btn.clicked.connect(lambda _=False, r=row: self._row_pause(r))
+        layout.addWidget(pause_btn)
+
+        # Per-row Remove (cancel) button
+        remove_btn = QPushButton("✕")
+        remove_btn.setFixedWidth(26)
+        remove_btn.setFixedHeight(26)
+        remove_btn.setToolTip("Remove this download")
+        remove_btn.clicked.connect(lambda _=False, r=row: self._row_cancel(r))
+        layout.addWidget(remove_btn)
+
         # Store references on the widget for later updates
-        row._title = title   # type: ignore[attr-defined]
-        row._bar = bar       # type: ignore[attr-defined]
-        row._eta = eta       # type: ignore[attr-defined]
+        row._title = title        # type: ignore[attr-defined]
+        row._bar = bar            # type: ignore[attr-defined]
+        row._eta = eta            # type: ignore[attr-defined]
+        row._pause_btn = pause_btn    # type: ignore[attr-defined]
+        row._remove_btn = remove_btn  # type: ignore[attr-defined]
         # Re-elide whenever the label gets its real width after layout
         title.installEventFilter(self)
         return row
+
+    # ---- per-row button handlers -----------------------------------------
+    def _sync_global_pause_btn(self) -> None:
+        """Tell the main window to re-evaluate the global pause button
+        and persist the new state."""
+        win = self.window()
+        sync = getattr(win, "_sync_pause_button", None)
+        if callable(sync):
+            sync()
+        save = getattr(win, "_save_state", None)
+        if callable(save):
+            save()
+
+    def _row_pause(self, row: QWidget) -> None:
+        item = getattr(row, "_item", None)
+        if item is None:
+            return
+        if item.paused:
+            self._manager.resume_item(item)
+        else:
+            self._manager.pause_item(item)
+        self.refresh()
+        self._sync_global_pause_btn()
+
+    def _row_cancel(self, row: QWidget) -> None:
+        item = getattr(row, "_item", None)
+        if item is None:
+            return
+        self._manager.remove_item(item)
+        self.refresh()
+        self._sync_global_pause_btn()
 
     def eventFilter(self, obj, event) -> bool:
         from PyQt6.QtCore import QEvent
@@ -222,6 +270,9 @@ class DownloadsCanvas(QWidget):
         pct = _row_pct(item, self._manager)
         eta_text = _row_eta(item, self._manager)
         caption = _caption(item, self._manager)
+
+        # Bind the item so the row's buttons act on it
+        row._item = item  # type: ignore[attr-defined]
 
         # Store caption so resize can re-elide
         row._caption = caption  # type: ignore[attr-defined]
@@ -246,6 +297,21 @@ class DownloadsCanvas(QWidget):
 
         # ETA
         row._eta.setText(eta_text)  # type: ignore[attr-defined]
+
+        # Per-row buttons: Pause/Resume hidden once finished; ✕ always
+        # available (removes the row from the list).
+        pause_btn = row._pause_btn  # type: ignore[attr-defined]
+        remove_btn = row._remove_btn  # type: ignore[attr-defined]
+        if state in ("completed", "failed"):
+            pause_btn.setVisible(False)
+            remove_btn.setToolTip("Remove from list")
+        else:
+            pause_btn.setVisible(True)
+            pause_btn.setText("Resume" if item.paused else "Pause")
+            pause_btn.setToolTip(
+                "Resume this download" if item.paused else "Pause this download"
+            )
+            remove_btn.setToolTip("Cancel and remove this download")
 
     @staticmethod
     def _elide(label: QLabel, text: str) -> str:
@@ -406,8 +472,8 @@ class MainWindow(QMainWindow):
         # ---- Downloads controls (right-aligned, under the section) ---------
         dl_controls = QHBoxLayout()
         dl_controls.addStretch(1)
-        self.pause_all_btn = QPushButton("Pause downloads")
-        self.pause_all_btn.setFixedWidth(150)
+        self.pause_all_btn = QPushButton("Pause all downloads")
+        self.pause_all_btn.setFixedWidth(180)
         self.pause_all_btn.setToolTip(
             "Pause every active and pending download (survives restart)"
         )
@@ -577,11 +643,15 @@ class MainWindow(QMainWindow):
         else:
             self._manager.pause_all()
         self._save_state()
+        self._refresh_downloads()
 
     def _has_anything_paused(self) -> bool:
         return bool(
             self._manager._paused_items
             or any(it.paused for it in self._manager.queue_items())
+            or any(
+                it.paused for it in getattr(self._manager, "_scheduled_retries", [])
+            )
         )
 
     def _on_clear_clicked(self) -> None:
@@ -596,9 +666,9 @@ class MainWindow(QMainWindow):
 
     def _sync_pause_button(self) -> None:
         if self._has_anything_paused():
-            self.pause_all_btn.setText("Resume downloads")
-        elif not self._manager._paused_items:
-            self.pause_all_btn.setText("Pause downloads")
+            self.pause_all_btn.setText("Resume all downloads")
+        else:
+            self.pause_all_btn.setText("Pause all downloads")
 
     def _ensure_fresh_paint(self) -> None:
         """Watchdog: request a normal paint of the downloads area.
@@ -686,8 +756,7 @@ class MainWindow(QMainWindow):
         self._manager.restore(self._settings, queue_items, active_items)
 
         self._refresh_downloads()
-        if self._has_anything_paused():
-            self.pause_all_btn.setText("Resume downloads")
+        self._sync_pause_button()
         self._state_save_timer.start()
         self._repaint_watchdog.start()
 
