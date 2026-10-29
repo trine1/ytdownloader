@@ -749,3 +749,17 @@ Added to PLAN.md (Basic requirements + Features):
   the `Package:` line.
 - Released as v0.5.6 (deb + generic installer + SHA256SUMS); the v0.5.5
   release and local artifacts were removed (only the latest is kept).
+
+### Unreleased — summary toast only for >1 completion (2026-10-29)
+- The queue-drain toast now fires only when **more than one** download
+  completed: a lone success already raised its own "Download complete"
+  toast, so summarising it repeated the same news. Failures are still
+  always reported — a batch that ends in failures raises the summary no
+  matter how many succeeded, because failures have no per-item toast.
+- Repository history purged with `git filter-repo`: all 28 older
+  self-extracting installers removed from every commit *and* every tag
+  (the two commits that existed only to delete old installers became empty
+  and were pruned; 37 → 35 commits). `main` and all 29 tags force-pushed,
+  then verified from a fresh clone that no old installer object is
+  reachable anywhere. The `v0.5.6` tag still points at `main` and its
+  release assets are untouched.

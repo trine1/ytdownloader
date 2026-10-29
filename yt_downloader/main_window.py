@@ -854,6 +854,12 @@ class MainWindow(QMainWindow):
         self._batch_failed = 0
         if not (done or failed) or not self._settings.get("notify_all_done"):
             return
+        # A single completed download already raised its own "Download
+        # complete" toast, so summarising it would just repeat the same
+        # news: only summarise once more than one download finished.
+        # Failures are still always reported — they have no per-item toast.
+        if done == 1 and not failed:
+            return
         parts = [f"{done} finished"]
         if failed:
             parts.append(f"{failed} failed")

@@ -120,7 +120,11 @@ python -m yt_downloader
   none is found the download fails immediately with a clear message instead of
   retrying.
 - **Desktop toast notifications**: every finished download raises a toast, and a
-  second, separate toast fires once the whole queue has drained. Both go through
+  second, separate toast summarises the batch **once the whole queue has
+  drained** — but only when **more than one** download finished, since a lone
+  success already announced itself and a summary would repeat it. Failures are
+  always reported (they have no toast of their own), so a batch that ends in
+  failures still raises the summary. Both go through
   a **direct D-Bus call** to `org.freedesktop.Notifications` — the app opens the
   session bus itself (SASL `EXTERNAL` authentication plus a hand-marshalled
   method call), so no `dbus-python`/PyGObject dependency is added. Each toast has
