@@ -162,9 +162,9 @@ corrupt state file.
   `ytdownloader-<version>-linux-installer.sh`:
 
   ```bash
-  bash ytdownloader-0.5.6-linux-installer.sh            # install to ~/.local
-  bash ytdownloader-0.5.6-linux-installer.sh --help     # options
-  bash ytdownloader-0.5.6-linux-installer.sh --uninstall
+  bash ytdownloader-0.5.7-linux-installer.sh            # install to ~/.local
+  bash ytdownloader-0.5.7-linux-installer.sh --help     # options
+  bash ytdownloader-0.5.7-linux-installer.sh --uninstall
   ```
 
   It installs into `~/.local/share/ytdownloader` (isolated venv), pip-installs

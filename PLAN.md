@@ -750,7 +750,7 @@ Added to PLAN.md (Basic requirements + Features):
 - Released as v0.5.6 (deb + generic installer + SHA256SUMS); the v0.5.5
   release and local artifacts were removed (only the latest is kept).
 
-### Unreleased — summary toast only for >1 completion (2026-10-29)
+### v0.5.7 — summary toast only for >1 completion (2026-10-29)
 - The queue-drain toast now fires only when **more than one** download
   completed: a lone success already raised its own "Download complete"
   toast, so summarising it repeated the same news. Failures are still
@@ -763,3 +763,6 @@ Added to PLAN.md (Basic requirements + Features):
   then verified from a fresh clone that no old installer object is
   reachable anywhere. The `v0.5.6` tag still points at `main` and its
   release assets are untouched.
+- Shipped as **v0.5.7**; the same purge was then repeated for the 0.5.6
+  installer so that the tree, the release, and *every commit and tag* hold
+  exactly one installer — the latest.
