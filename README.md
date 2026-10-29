@@ -6,8 +6,15 @@ audio/video in the highest supported resolution, using [yt-dlp](https://github.c
 ## Requirements
 
 - Python 3
-- [PyQt6](https://pypi.org/project/PyQt6/) (installed automatically by uv)
-- [yt-dlp](https://github.com/yt-dlp/yt-dlp) (on `PATH`)
+- [PyQt6](https://pypi.org/project/PyQt6/) (installed automatically)
+- [yt-dlp](https://github.com/yt-dlp/yt-dlp) — both installers fetch the
+  **newest release from PyPI** into the app's own environment, so no system
+  copy is required. At runtime the app looks for yt-dlp in this order:
+  1. its own environment (`<venv>/bin/yt-dlp` — the PyPI-latest copy),
+  2. whatever is on `PATH` (the .deb uses the distro package),
+  3. `python -m yt_dlp`.
+
+  **Help → Version** shows which copy is in use and its version.
 - [ffmpeg](https://ffmpeg.org/) (for audio extraction and video merging)
 
 Developed on Omarchy Linux (Hyprland/Wayland), Python 3.14.
@@ -22,8 +29,8 @@ From the project directory:
 uv tool install --force .
 ```
 
-This creates an isolated environment with PyQt6 and installs a `ytdownloader`
-executable on your PATH (`~/.local/bin/ytdownloader`). Then:
+This creates an isolated environment with PyQt6 and yt-dlp and installs a
+`ytdownloader` executable on your PATH (`~/.local/bin/ytdownloader`). Then:
 
 ```bash
 ytdownloader
@@ -103,7 +110,15 @@ python -m yt_downloader
   downloads run, the confirmation dialog reminds you that they will be
   automatically resumed next time. **Shift+Ctrl+Q** exits immediately without
   prompting (state is still saved).
-- **Help menu** shows the current version of the tool.
+- **Help menu** shows the app, yt-dlp, ffmpeg and Python versions — including
+  *which* yt-dlp copy the app resolved (own environment / `PATH` /
+  `python -m yt_dlp`).
+- **Newest yt-dlp, automatically**: the app prefers the yt-dlp inside its own
+  environment, which the installers refresh from PyPI on every install, so a
+  download breakage fixed upstream can be picked up without waiting for a
+  distro package. It falls back to `PATH` and then to `python -m yt_dlp`; if
+  none is found the download fails immediately with a clear message instead of
+  retrying.
 - **Desktop toast notifications**: every finished download raises a toast, and a
   second, separate toast fires once the whole queue has drained. Both go through
   a **direct D-Bus call** to `org.freedesktop.Notifications` — the app opens the
@@ -143,18 +158,21 @@ corrupt state file.
   `ytdownloader-<version>-linux-installer.sh`:
 
   ```bash
-  bash ytdownloader-0.2.0-linux-installer.sh            # install to ~/.local
-  bash ytdownloader-0.2.0-linux-installer.sh --help     # options
-  bash ytdownloader-0.2.0-linux-installer.sh --uninstall
+  bash ytdownloader-0.5.6-linux-installer.sh            # install to ~/.local
+  bash ytdownloader-0.5.6-linux-installer.sh --help     # options
+  bash ytdownloader-0.5.6-linux-installer.sh --uninstall
   ```
 
   It installs into `~/.local/share/ytdownloader` (isolated venv), pip-installs
-  PyQt6 and yt-dlp from PyPI (internet needed once at install time), creates
+  PyQt6 and yt-dlp from PyPI — yt-dlp is then upgraded to the **latest release**
+  on every install (internet needed once at install time), creates
   `~/.local/bin/ytdownloader` and a desktop entry, and — if ffmpeg is missing
   system-wide — downloads a static x86_64 build automatically (this step can
   be skipped with `--no-ffmpeg`). Requires Python ≥ 3.10 and a graphical
   desktop session. Existing state (saved downloads) is preserved across
-  installs and upgrades.
+  installs and upgrades, and **`--uninstall` keeps your `state.json`** (queue,
+  settings, notification preferences) while removing the app, launcher and
+  desktop entry.
 
 ## Releases
 

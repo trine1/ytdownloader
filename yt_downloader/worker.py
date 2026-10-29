@@ -13,11 +13,15 @@ Two operations are supported:
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import re
+import shutil
 import subprocess
+import sys
 from dataclasses import dataclass, field
-from typing import Optional
+from pathlib import Path
+from typing import List, Optional
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
@@ -39,6 +43,98 @@ DESTINATION_RE = re.compile(
     r"\[(?:download|ExtractAudio|MergeFormats|postprocess)]\s+Destination:\s+(?P<path>.+)",
     re.IGNORECASE,
 )
+
+
+# Shown when no yt-dlp can be found at all — previously the app said
+# "yt-dlp not found on PATH", which was misleading: the launcher puts the
+# app's *private* venv bin dir on PATH, and a missing copy there is not a
+# PATH problem.
+YTDLP_MISSING = (
+    "yt-dlp not found — install it with `pip install yt-dlp` "
+    "or your package manager"
+)
+
+
+def ytdlp_command() -> List[str]:
+    """Resolve the argv prefix used to run yt-dlp.
+
+    Search order:
+
+    1. ``<sys.prefix>/bin/yt-dlp`` — the copy shipped inside this app's own
+       environment (installer / ``uv tool install``), which is the newest
+       one from PyPI. That venv's ``bin`` is frequently *not* on PATH for
+       child processes, so PATH alone would silently pick an older system
+       copy.
+    2. whatever ``PATH`` finds (the .deb relies on the distro package).
+    3. the ``yt_dlp`` module importable by this interpreter, via
+       ``python -m yt_dlp``.
+
+    Returns ``[]`` when nothing is available; callers must report that
+    instead of launching (``Popen([])`` would raise ``IndexError``).
+    """
+    env_copy = Path(sys.prefix) / "bin" / "yt-dlp"
+    if env_copy.is_file() and os.access(env_copy, os.X_OK):
+        return [str(env_copy)]
+    on_path = shutil.which("yt-dlp")
+    if on_path:
+        return [on_path]
+    try:
+        if importlib.util.find_spec("yt_dlp") is not None:
+            return [sys.executable, "-m", "yt_dlp"]
+    except (ImportError, ValueError, AttributeError):
+        pass
+    return []
+
+
+def tool_version(command: List[str]) -> str:
+    """First line of ``command --version``, or ``""`` if it cannot run."""
+    if not command:
+        return ""
+    try:
+        proc = subprocess.run(
+            [*command, "--version"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=20,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    for line in (proc.stdout or "").splitlines():
+        line = line.strip()
+        if line:
+            return line
+    return ""
+
+
+def ytdlp_version() -> str:
+    """Version of the yt-dlp this app would actually execute ("" if none)."""
+    return tool_version(ytdlp_command())
+
+
+def ytdlp_source() -> str:
+    """Where the resolved yt-dlp comes from: for Help → Version / support."""
+    cmd = ytdlp_command()
+    if not cmd:
+        return "not found"
+    if len(cmd) > 1:
+        return "python -m yt_dlp"
+    if cmd[0] == str(Path(sys.prefix) / "bin" / "yt-dlp"):
+        return "app environment"
+    return "PATH"
+
+
+def ffmpeg_version() -> str:
+    """Short ffmpeg version (``"6.1.1-3"``), or ``""`` when unavailable."""
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        return ""
+    first = tool_version([ffmpeg])
+    # "ffmpeg version 6.1.1-3 Copyright ..." -> "6.1.1-3"
+    parts = first.split()
+    if len(parts) >= 3 and parts[0] == "ffmpeg" and parts[1] == "version":
+        return parts[2]
+    return first
 
 
 def format_seconds(seconds: Optional[int]) -> str:
@@ -170,8 +266,12 @@ class Worker(QThread):
     # ---- validation ------------------------------------------------------
     def _run_validation(self) -> None:
         assert self._url is not None
+        cmd = ytdlp_command()
+        if not cmd:
+            self.validated.emit(False, self._url, YTDLP_MISSING)
+            return
         args = [
-            "yt-dlp",
+            *cmd,
             "--no-playlist",
             "--socket-timeout",
             "15",
@@ -191,7 +291,7 @@ class Worker(QThread):
                 text=True,
             )
         except FileNotFoundError:
-            self.validated.emit(False, self._url, "yt-dlp not found on PATH")
+            self.validated.emit(False, self._url, YTDLP_MISSING)
             self._proc = None
             return
         except OSError as exc:
@@ -229,7 +329,11 @@ class Worker(QThread):
         os.makedirs(item.output_dir, exist_ok=True)
         output_template = output_template_for(item)
 
-        args = ["yt-dlp", "--no-playlist", "--extractor-args", "youtube:player_client=android"]
+        cmd = ytdlp_command()
+        if not cmd:
+            self.finished.emit(False, YTDLP_MISSING, None)
+            return
+        args = [*cmd, "--no-playlist", "--extractor-args", "youtube:player_client=android"]
         if getattr(self, "_resume", False):
             # Resume a partially downloaded file.
             args.append("-c")
@@ -258,6 +362,10 @@ class Worker(QThread):
                 stderr=subprocess.STDOUT,
                 text=True,
             )
+        except FileNotFoundError:
+            self.finished.emit(False, YTDLP_MISSING, None)
+            self._proc = None
+            return
         except OSError as exc:
             self.finished.emit(False, f"failed to start yt-dlp: {exc}", None)
             self._proc = None

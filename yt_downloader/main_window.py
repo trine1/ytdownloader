@@ -5,6 +5,7 @@ from __future__ import annotations
 import functools
 import inspect
 import os
+import platform
 import traceback
 from typing import Dict, List, Optional
 
@@ -32,7 +33,7 @@ from . import dbus_notify
 from .manager import DownloadManager
 from .settings_dialog import SettingsDialog
 from .state import _item_from_dict, load_state, save_state
-from .worker import DownloadItem, format_seconds
+from .worker import DownloadItem, ffmpeg_version, format_seconds, ytdlp_source, ytdlp_version
 
 APP_TITLE = "YouTube Downloader"
 DEFAULT_OUTPUT_DIR = os.path.expanduser("~/Downloads")
@@ -904,10 +905,16 @@ class MainWindow(QMainWindow):
 
     @_safe_slot
     def _show_version(self) -> None:
+        ytdlp = ytdlp_version() or "not found"
+        ffmpeg = ffmpeg_version() or "not found"
         QMessageBox.information(
             self,
             f"{APP_TITLE} — Version",
-            f"{APP_TITLE}\n\nVersion {APP_VERSION}\n\n"
+            f"{APP_TITLE}\n\n"
+            f"Version       {APP_VERSION}\n"
+            f"yt-dlp        {ytdlp}  ({ytdlp_source()})\n"
+            f"ffmpeg        {ffmpeg}\n"
+            f"Python        {platform.python_version()}\n\n"
             f"A Qt graphical YouTube downloader powered by yt-dlp.",
         )
 

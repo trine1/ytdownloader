@@ -12,7 +12,7 @@ Running it (bash <script>) will:
     * if ffmpeg is missing system-wide, optionally download a static build
       into the app's private bin dir (skipped with --no-ffmpeg)
     * create <prefix>/bin/ytdownloader launcher and a desktop entry
-    * support --uninstall and --help
+    * support --uninstall (which keeps the user's state.json) and --help
 
 The script therefore has no distro-specific dependencies (no apt/dnf needed),
 unlike the Debian package.
@@ -71,6 +71,8 @@ Options:
   --prefix DIR     install under DIR (default: $HOME/.local)
   --no-ffmpeg      do not auto-download a static ffmpeg when none is found
   --uninstall      remove the installed app, launcher, and desktop entry
+                   (your saved state in <prefix>/share/ytdownloader/state.json
+                   is kept)
   --help           show this help and exit
 
 This installer creates an isolated environment under
@@ -99,8 +101,23 @@ DESKTOP_FILE="$DESKTOP_DIR/$APP_ID.desktop"
 
 if [ "$ACTION" = "uninstall" ]; then
     info "Removing $SHARE_DIR, $LAUNCHER, $DESKTOP_FILE"
+    # The app's state file lives *inside* SHARE_DIR (it is the app's XDG
+    # data dir): the queue, settings and notification preferences. Save it
+    # aside first — uninstalling the app must not delete user data.
+    STATE_KEEP=""
+    if [ -f "$SHARE_DIR/state.json" ]; then
+        STATE_KEEP="$(mktemp -d)" || STATE_KEEP=""
+        [ -n "$STATE_KEEP" ] && cp -p "$SHARE_DIR/state.json" "$STATE_KEEP/state.json" \
+            || STATE_KEEP=""
+    fi
     rm -rf "$SHARE_DIR"
     rm -f "$LAUNCHER" "$DESKTOP_FILE"
+    if [ -n "$STATE_KEEP" ] && [ -f "$STATE_KEEP/state.json" ]; then
+        mkdir -p "$SHARE_DIR"
+        mv "$STATE_KEEP/state.json" "$SHARE_DIR/state.json"
+        rmdir "$STATE_KEEP" 2>/dev/null || true
+        info "   kept your state: $SHARE_DIR/state.json"
+    fi
     info "Uninstall complete."
     exit 0
 fi
@@ -146,6 +163,12 @@ fi
 info "Installing PyQt6 and yt-dlp from PyPI (one-time download) ..."
 "$SHARE_DIR/venv/bin/pip" install --upgrade pip >/dev/null
 "$SHARE_DIR/venv/bin/pip" install "$WORK" >&2 || die "pip install of ytdownloader failed"
+# pyproject declares yt-dlp, but re-resolve it explicitly so the app always
+# gets the *newest* release from PyPI rather than whatever a cached wheel
+# happened to carry.
+"$SHARE_DIR/venv/bin/pip" install --upgrade yt-dlp >&2 \
+    || die "pip install of yt-dlp failed"
+info "   yt-dlp: $("$SHARE_DIR/venv/bin/yt-dlp" --version 2>/dev/null || echo 'installed (version unknown)')"
 
 # ---------------------------------------------------------------- ffmpeg
 FFMPEG_DL_WARNING=""
@@ -211,7 +234,13 @@ info "   app data : $SHARE_DIR"
 info "   launcher : $LAUNCHER (on PATH if ${BIN_DIR} is in PATH)"
 info "   desktop  : $DESKTOP_FILE"
 [ -n "$FFMPEG_DL_WARNING" ] && info "note: $FFMPEG_DL_WARNING"
-START="$(command -v "$APP_ID" 2>/dev/null || echo "$LAUNCHER")"
+# Prefer the bare command only when this install's bin dir is actually on
+# PATH; otherwise name the launcher we just wrote (command -v would happily
+# return some *other* copy of ytdownloader found elsewhere on the system).
+START="$LAUNCHER"
+case ":$PATH:" in
+    *":$BIN_DIR:"*) START="$APP_ID" ;;
+esac
 info "Run it with: $START   (or find “YouTube Downloader” in your app menu)"
 info "Desktop-file cache: some file managers need a re-login to show the entry."
 info "Existing downloads/state (if this is an upgrade) are preserved."

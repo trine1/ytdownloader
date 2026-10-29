@@ -16,7 +16,7 @@ import tarfile
 import time
 
 PACKAGE = "ytdownloader"
-VERSION = "0.5.5-1"
+VERSION = "0.5.6-1"
 ARCH = "amd64"
 OUTPUT = f"{PACKAGE}_{VERSION.split('-')[0]}_{ARCH}.deb"
 
@@ -53,7 +53,19 @@ def build_control_tar() -> bytes:
     buf = io.BytesIO()
     control_path = os.path.join(DEBIAN_DIR, "control")
     with open(control_path) as f:
-        control_bytes = f.read().encode("utf-8")
+        control = f.read()
+
+    # debian/control deliberately carries no Version: dpkg-buildpackage takes
+    # it from debian/changelog. We assemble the .deb by hand, so inject it
+    # here — dpkg requires a Version field in a binary control file and
+    # rejects the package without one.
+    if not control.startswith("Version:") and "\nVersion:" not in control:
+        pkg_line = f"Package: {PACKAGE}\n"
+        if pkg_line not in control:
+            raise RuntimeError(f"no {pkg_line.strip()!r} line in debian/control")
+        control = control.replace(pkg_line, pkg_line + f"Version: {VERSION}\n", 1)
+
+    control_bytes = control.encode("utf-8")
 
     with tarfile.open(fileobj=buf, mode="w:gz") as tar:
         info = tarfile.TarInfo(name="./control")

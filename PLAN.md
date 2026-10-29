@@ -693,3 +693,59 @@ Added to PLAN.md (Basic requirements + Features):
   `All downloads finished / 1 finished` (individual toast off in phase 2,
   proving the switches gate the real notifications).
 - Released as v0.5.5 (deb + generic installer + SHA256SUMS).
+
+### v0.5.6 — installer honesty: real yt-dlp install, state-safe uninstall (2026-10-29)
+- **The installer now really installs yt-dlp.** Its banner always claimed
+  "Installing PyQt6 and yt-dlp from PyPI" while only running
+  `pip install "$WORK"` — and pyproject declared PyQt6 alone, so neither
+  the installer nor `uv tool install` produced a working downloader on a
+  machine without a system yt-dlp. `yt-dlp` is now a declared dependency
+  (pyproject.toml + requirements.txt) *and* the installer runs an explicit
+  `pip install --upgrade yt-dlp` afterwards so every install gets the
+  newest PyPI release rather than a cached wheel; it prints the version it
+  installed. The .deb already declared `Depends: yt-dlp` and ships no
+  dependency metadata of its own (build_deb.py is a pure ar/tar copier),
+  so it needed no change.
+- **`--uninstall` no longer deletes your state.** The app writes
+  `state.json` to `$XDG_DATA_HOME/ytdownloader/` — which is *exactly* the
+  directory the installer owns (`$PREFIX/share/ytdownloader`), so the old
+  `rm -rf "$SHARE_DIR"` wiped the queue, settings and notification
+  preferences along with the venv. state.json is now copied aside before
+  the removal and restored afterwards; the venv, launcher and desktop
+  entry are still deleted.
+- **The app resolves yt-dlp itself** (`worker.ytdlp_command()`), in order:
+  1. `<sys.prefix>/bin/yt-dlp` — the copy in the app's own environment
+     (installer / `uv tool install`), i.e. the PyPI-latest one. That venv's
+     `bin` is usually *not* on PATH for child processes, which is why the
+     old hard-coded `Popen(["yt-dlp", ...])` silently used whatever the
+     distro had (2026.08.19 here while PyPI was at 2026.10.26);
+  2. `shutil.which("yt-dlp")` (the .deb relies on the distro package);
+  3. `[sys.executable, "-m", "yt_dlp"]` when the module is importable;
+  4. otherwise `[]` → a clear "yt-dlp not found — install it with
+     `pip install yt-dlp`" on both the validate and download paths, with
+     no process launch (`Popen([])` would raise IndexError and, worse,
+     the old code would have retried a doomed download 10 times).
+  Both invocation sites use it; `FileNotFoundError` at exec time now
+  reports the same message. `tool_version()` / `ytdlp_version()` /
+  `ffmpeg_version()` / `ytdlp_source()` back the new **Help → Version**
+  dialog, which lists app, yt-dlp (+ which copy), ffmpeg and Python.
+- **Fixed a cosmetic installer bug** found by the E2E: the final
+  "Run it with:" line used `command -v ytdownloader`, which could name a
+  *different* installation already on PATH; it now names the launcher just
+  written (or the bare command only when this install's bin dir is on PATH).
+- Verified: new 28-check `ytd-ytdlp-test.py` (all four resolution branches
+  by patching sys.prefix/PATH/sys.path, both no-yt-dlp error paths, real
+  version + dialog text); installer E2E in a throwaway `--prefix`
+  (14 checks: venv yt-dlp == PyPI latest `2026.10.26`, app resolves its own
+  copy, launcher/desktop written, then `--uninstall` keeps state.json
+  byte-identical while removing venv/launcher/desktop); a real download
+  through the new path (307 KB m4a, yt-dlp 2026.10.26); all previous
+  suites (smoke, width, row-buttons, uicheck, toast, slot-arg, killer) and
+  the 7-state ✕ reproducer pass.
+- **The hand-built .deb had no `Version:` field.** `build_deb.py` copies
+  `debian/control` verbatim (correct for a real dpkg build, which takes the
+  version from `debian/changelog`), so every released .deb was missing a
+  field dpkg requires — the builder now injects `Version: <VERSION>` after
+  the `Package:` line.
+- Released as v0.5.6 (deb + generic installer + SHA256SUMS); the v0.5.5
+  release and local artifacts were removed (only the latest is kept).
