@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import functools
+import inspect
 import os
+import traceback
 from typing import Dict, List, Optional
 
 from PyQt6.QtCore import QTimer, Qt
@@ -25,6 +28,7 @@ from PyQt6.QtWidgets import (
 )
 
 from . import __version__ as APP_VERSION
+from . import dbus_notify
 from .manager import DownloadManager
 from .settings_dialog import SettingsDialog
 from .state import _item_from_dict, load_state, save_state
@@ -32,6 +36,49 @@ from .worker import DownloadItem, format_seconds
 
 APP_TITLE = "YouTube Downloader"
 DEFAULT_OUTPUT_DIR = os.path.expanduser("~/Downloads")
+
+
+def _safe_slot(fn):
+    """Run a Qt slot so an exception can never escape into PyQt6.
+
+    PyQt6 routes exceptions raised inside a slot through sys.excepthook and
+    aborts the process (core dump). A plain Python error in any button
+    handler or signal slot therefore looked like "the application
+    terminates". Log it and keep the event loop alive instead.
+
+    Two subtleties handled here:
+
+    * ``functools.wraps`` leaves the wrapper taking ``*args``, and PyQt
+      passes the *whole* signal payload to such a callable (it only trims
+      arguments for plain signatures) — e.g. ``item_finished(item, ok, msg,
+      dest)`` handed four arguments to ``_save_state()``. The wrapper
+      therefore trims to the wrapped function's declared parameters.
+    * Anything still wrong (a genuine bug) is printed instead of being
+      allowed to reach Qt, where it would take the app down.
+    """
+    try:
+        params = list(inspect.signature(fn).parameters.values())
+        n_pos = len([
+            p for p in params
+            if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
+        ])
+        has_varargs = any(p.kind == p.VAR_POSITIONAL for p in params)
+    except (TypeError, ValueError):
+        n_pos, has_varargs = 0, True
+    # Qt calls the *bound* method, so `self` is already bound: keep at most
+    # (n_pos - 1) of the signal's own arguments.
+    limit = None if has_varargs else max(n_pos - 1, 0)
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        if limit is not None and len(args) > limit + 1:
+            args = args[: limit + 1]
+        try:
+            return fn(*args, **kwargs)
+        except Exception:
+            traceback.print_exc()
+            return None
+    return wrapper
 
 
 def _row_state(item: DownloadItem, manager: DownloadManager) -> str:
@@ -236,6 +283,7 @@ class DownloadsCanvas(QWidget):
         if callable(save):
             save()
 
+    @_safe_slot
     def _row_pause(self, row: QWidget) -> None:
         item = getattr(row, "_item", None)
         if item is None:
@@ -247,6 +295,7 @@ class DownloadsCanvas(QWidget):
         self.refresh()
         self._sync_global_pause_btn()
 
+    @_safe_slot
     def _row_cancel(self, row: QWidget) -> None:
         item = getattr(row, "_item", None)
         if item is None:
@@ -351,12 +400,21 @@ class MainWindow(QMainWindow):
             "initial_backoff": 5,
             "max_backoff": 300,
             "default_output_dir": DEFAULT_OUTPUT_DIR,
+            # Desktop toasts (Settings -> Preferences -> Notifications).
+            "notify_completed": True,
+            "notify_all_done": True,
         }
 
         self._validated_url: Optional[str] = None
         self._validated_title: Optional[str] = None
         self._closing = False
         self._force_quit = False
+
+        # Toast bookkeeping: is a batch of downloads outstanding, and how
+        # many of it finished (to phrase the "all done" toast)?
+        self._batch_pending = False
+        self._batch_completed = 0
+        self._batch_failed = 0
 
         self._manager = DownloadManager()
         self._manager.configure(**{
@@ -521,12 +579,15 @@ class MainWindow(QMainWindow):
         self._manager.item_completed.connect(self._on_item_completed)
         # Every manager change refreshes the canvas (one atomic repaint).
         self._manager.queue_changed.connect(self._refresh_downloads)
+        # Toast when the queue drains (Preferences -> Notifications).
+        self._manager.queue_changed.connect(self._on_queue_changed)
         # State persistence.
         self._manager.queue_changed.connect(self._save_state)
         self._manager.item_started.connect(self._save_state)
         self._manager.item_finished.connect(self._save_state)
 
     # ------------------------------------------------------------------ settings
+    @_safe_slot
     def _open_settings(self) -> None:
         dlg = SettingsDialog(self._settings, self)
         if dlg.exec():
@@ -543,6 +604,7 @@ class MainWindow(QMainWindow):
             self._save_state()
 
     # ------------------------------------------------------------------ validation
+    @_safe_slot
     def _on_url_changed(self, text: str) -> None:
         self._validated_url = None
         self._validated_title = None
@@ -552,6 +614,7 @@ class MainWindow(QMainWindow):
         if text.strip():
             self._validation_timer.start()
 
+    @_safe_slot
     def _run_validation(self) -> None:
         text = self.url_input.text().strip()
         if not text:
@@ -560,6 +623,7 @@ class MainWindow(QMainWindow):
         self.validation_label.setStyleSheet("color: #666; font-style: italic;")
         self._manager.validate(text)
 
+    @_safe_slot
     def _on_validated(self, ok: bool, resolved_url: str, title_or_error: str) -> None:
         if ok:
             self._validated_url = resolved_url
@@ -575,6 +639,7 @@ class MainWindow(QMainWindow):
         self.download_btn.setEnabled(enabled)
 
     # ------------------------------------------------------------------ queue / download
+    @_safe_slot
     def _on_browse(self) -> None:
         directory = QFileDialog.getExistingDirectory(
             self, "Select output directory", self.output_input.text()
@@ -593,6 +658,7 @@ class MainWindow(QMainWindow):
         output_dir = self.output_input.text().strip() or DEFAULT_OUTPUT_DIR
         return (self._validated_url, kind, output_dir)
 
+    @_safe_slot
     def _on_download_now(self) -> None:
         target = self._validated_target()
         if target is None:
@@ -643,6 +709,7 @@ class MainWindow(QMainWindow):
         self.validation_label.setText("Enter a URL or ID to validate")
         self.validation_label.setStyleSheet("color: #666; font-style: italic;")
 
+    @_safe_slot
     def _on_pause_all(self) -> None:
         if self._has_anything_paused():
             self._manager.resume_all()
@@ -660,11 +727,13 @@ class MainWindow(QMainWindow):
             )
         )
 
+    @_safe_slot
     def _on_clear_clicked(self) -> None:
         self._manager.clear_downloaded()
         self._set_status("Completed and failed items cleared")
 
     # ------------------------------------------------------------------ canvas refresh
+    @_safe_slot
     def _refresh_downloads(self) -> None:
         """One atomic canvas repaint — every row, every control, every time."""
         self._canvas.refresh()
@@ -721,19 +790,24 @@ class MainWindow(QMainWindow):
         self.status_label.setText(display)
 
     # ------------------------------------------------------------------ worker events
+    @_safe_slot
     def _on_item_started(self, item: DownloadItem) -> None:
+        self._batch_pending = True   # a batch is outstanding: may warrant a toast
         self._canvas.refresh()
         self._set_status(f"Downloading: {item.title or item.url}")
 
+    @_safe_slot
     def _on_item_progress(self, item: DownloadItem, percent: int, eta_seconds: int) -> None:
         setattr(item, "last_pct", percent)
         setattr(item, "last_eta", eta_seconds)
         # Widget-based row: push new values into the row's own widgets.
         self._canvas.update_item(item)
 
+    @_safe_slot
     def _on_item_status(self, item: DownloadItem, message: str) -> None:
         self._set_status(message)
 
+    @_safe_slot
     def _on_item_finished(
         self, item: DownloadItem, success: bool, message: str, destination: str
     ) -> None:
@@ -746,12 +820,47 @@ class MainWindow(QMainWindow):
             )
         else:
             setattr(item, "fail_message", message)
+            self._batch_failed += 1
             self._set_status(f"FAILED: {item.title or item.url} — {message}")
 
+    @_safe_slot
     def _on_item_completed(self, item: DownloadItem, destination: str) -> None:
+        self._batch_completed += 1
         self._refresh_downloads()
+        # Toast for this one download (Settings -> Preferences -> Notifications).
+        if self._settings.get("notify_completed"):
+            name = os.path.basename(destination) if destination else ""
+            dbus_notify.notify_async("Download complete", name or item.title or item.url)
+
+    @_safe_slot
+    def _on_queue_changed(self) -> None:
+        """Fire the batch toast once nothing is queued/active/paused/retrying."""
+        mgr = self._manager
+        live = bool(
+            mgr.active_items()
+            or mgr.queue_items()
+            or mgr._paused_items
+            or mgr._scheduled_retries
+        )
+        if live:
+            self._batch_pending = True
+            return
+        if not self._batch_pending:
+            return
+        self._batch_pending = False
+        done, failed = self._batch_completed, self._batch_failed
+        self._batch_completed = 0
+        self._batch_failed = 0
+        if not (done or failed) or not self._settings.get("notify_all_done"):
+            return
+        parts = [f"{done} finished"]
+        if failed:
+            parts.append(f"{failed} failed")
+        summary = "All downloads finished" if done else "All downloads failed"
+        dbus_notify.notify_async(summary, ", ".join(parts))
 
     # ------------------------------------------------------------------ state persistence
+    @_safe_slot
     def _save_state(self) -> None:
         """Persist current settings, queue, active downloads."""
         if self._closing:
@@ -771,7 +880,8 @@ class MainWindow(QMainWindow):
             return
         saved = payload.get("settings", {})
         for key in ("max_parallel", "max_attempts", "initial_backoff",
-                    "max_backoff", "default_output_dir"):
+                    "max_backoff", "default_output_dir",
+                    "notify_completed", "notify_all_done"):
             if key in saved:
                 self._settings[key] = saved[key]
         self.output_input.setText(self._settings["default_output_dir"])
@@ -792,6 +902,7 @@ class MainWindow(QMainWindow):
         self._force_quit = True
         self.close()
 
+    @_safe_slot
     def _show_version(self) -> None:
         QMessageBox.information(
             self,

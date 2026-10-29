@@ -30,6 +30,40 @@ def _canonical_source(url: str) -> str:
     return url or ""
 
 
+def dispose_worker(worker) -> None:
+    """Destroy *worker* only once its thread has actually stopped.
+
+    Qt aborts the whole process ("QThread: Destroyed while thread is still
+    running" -> qFatal -> SIGABRT) if a QThread is deleted while running.
+    The per-row remove button hits exactly that path: it stops the worker
+    and would otherwise delete it immediately, while yt-dlp is still
+    winding down. Accessing the deleted wrapper later then raises
+    RuntimeError, and an exception escaping a PyQt slot dumps core —
+    so the app "just terminates" on the click.
+
+    Instead we poll ``isRunning()`` (cheap, on the GUI thread, every 50 ms)
+    and delete only when it is False. A wrapper that is already gone is
+    treated as disposed.
+    """
+    if worker is None:
+        return
+
+    def _try(w=worker) -> None:
+        try:
+            running = w.isRunning()
+        except RuntimeError:
+            return  # C++ object already destroyed — nothing to do
+        if running:
+            QTimer.singleShot(50, lambda: _try(w))
+        else:
+            try:
+                w.deleteLater()
+            except RuntimeError:
+                pass
+
+    _try()
+
+
 class DownloadManager(QObject):
     """Manages a queue of downloads with parallelism and auto-retry.
 
@@ -102,7 +136,7 @@ class DownloadManager(QObject):
         worker.finished.connect(
             lambda *_, w=worker: self._validation_workers.discard(w)
         )
-        worker.finished.connect(lambda *_: worker.deleteLater())
+        worker.finished.connect(lambda *_: dispose_worker(worker))
         worker.validate(text)
 
     def matching_item(self, url: str, kind: str) -> Optional[DownloadItem]:
@@ -239,7 +273,7 @@ class DownloadManager(QObject):
                 self._cancelled_workers.add(worker)
                 worker.stop()
                 self._active.pop(worker, None)
-                worker.deleteLater()
+                dispose_worker(worker)
                 self.item_status.emit(item, "Removed by user")
                 self.queue_changed.emit()
                 QTimer.singleShot(0, self._start_next)
@@ -524,10 +558,7 @@ class DownloadManager(QObject):
 
         def done(ok: bool, url: str, title_or_error: str, w=worker, it=target) -> None:
             self._title_workers.discard(w)
-            try:
-                w.deleteLater()
-            except RuntimeError:
-                pass
+            dispose_worker(w)
             if ok and title_or_error and not getattr(it, "title", ""):
                 it.title = title_or_error
                 self.queue_changed.emit()
@@ -582,7 +613,7 @@ class DownloadManager(QObject):
         destination: Optional[str],
     ) -> None:
         self._active.pop(worker, None)
-        worker.deleteLater()
+        dispose_worker(worker)
 
         # Removals are intentional, not failures: never retry, never mark done.
         if worker in self._cancelled_workers:

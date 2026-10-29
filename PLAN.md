@@ -648,3 +648,48 @@ Added to PLAN.md (Basic requirements + Features):
     refreshed rows/buttons; previously it didn't).
 - Tests: new uicheck suite (21 checks) + all previous suites pass.
 - Released as v0.5.4 (deb + generic installer + SHA256SUMS).
+
+### v0.5.5 — D-Bus toast notifications + fixes the ✕ crash (2026-10-29)
+- **New `yt_downloader/dbus_notify.py`**: a *direct* D-Bus client. It opens
+  the session bus socket itself, authenticates with SASL `EXTERNAL`
+  (hex-encoded uid), sends `org.freedesktop.DBus.Hello` (the bus ignores
+  every later message otherwise — found by relaying real clients through a
+  logging socket proxy and diffing against known-good traffic), marshalls
+  the `org.freedesktop.Notifications.Notify` call (`susssasa{sv}i`) by
+  hand, and reads the reply (body length lives at header bytes 4–7, not
+  8–11; unsolicited signals such as `NameAcquired` are skipped until the
+  real reply arrives). Zero new dependencies — still only PyQt6.
+  `notify()` never raises (returns False on any failure), `notify_async()`
+  fires it on a daemon thread so the GUI never waits on D-Bus.
+- **Two independent preferences** (Settings → Preferences → Notifications,
+  both on by default, persisted in state.json):
+  - `notify_completed` — toast for each individual finished download
+    (`Download complete` / `<filename>`).
+  - `notify_all_done` — one toast when the queue drains, i.e. nothing is
+    queued, active, paused or awaiting a retry (`All downloads finished` /
+    `1 finished` or `0 finished, 1 failed`; `All downloads failed` when
+    nothing succeeded). Fire-once per batch, reset by the next batch.
+- **Crash fix — clicking ✕ terminated the app** (reproduced, two causes):
+  1. `remove_active()` called `worker.deleteLater()` while the QThread was
+     still running → `QThread: Destroyed while thread is still running` →
+     `qFatal` → `Fatal Python error: Aborted`. New `dispose_worker()`
+     polls `isRunning()` (50 ms) and defers `deleteLater()` until the
+     thread has stopped; applied to all four worker-deletion sites.
+  2. Any exception escaping a PyQt slot dumps core (PyQt routes it through
+     `sys.excepthook`, which aborts). Every Qt entry point (row buttons,
+     menu/button slots, manager signal slots) now runs under `@_safe_slot`,
+     which logs the error and keeps the event loop alive — and **trims
+     signal arguments to the slot's declared signature**, because PyQt
+     hands the whole payload to a `*args/**kwargs` wrapper (without that,
+     `item_finished(item, ok, msg, dest)` reached the 0-arg `_save_state()`
+     and `clicked(bool)` reached the 0-arg button slots).
+- Verified: 7-state ✕ reproducer (queued / active / paused / retrying /
+  completed / failed / queued-last) all exit cleanly; 25-check toast and
+  preference suite; 11-check slot-argument suite (real `.click()` on the
+  global buttons, 0 bytes of stderr); plus the smoke, width, row-button,
+  uicheck and killer-warning suites.
+- End-to-end on Wayland with two real downloads: the desktop notification
+  daemon recorded `Download complete / Me at the zoo [audio].m4a` and
+  `All downloads finished / 1 finished` (individual toast off in phase 2,
+  proving the switches gate the real notifications).
+- Released as v0.5.5 (deb + generic installer + SHA256SUMS).

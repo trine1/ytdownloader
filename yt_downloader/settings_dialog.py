@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from PyQt6.QtWidgets import (
+    QCheckBox,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
@@ -21,7 +22,8 @@ class SettingsDialog(QDialog):
     """User-configurable download behaviour.
 
     Returns a dict with keys:
-        max_parallel, max_attempts, initial_backoff, max_backoff, default_output_dir
+        max_parallel, max_attempts, initial_backoff, max_backoff,
+        default_output_dir, notify_completed, notify_all_done
     """
 
     def __init__(self, settings: dict, parent=None) -> None:
@@ -80,6 +82,26 @@ class SettingsDialog(QDialog):
         outdir_layout.addWidget(self.browse_btn)
         layout.addWidget(outdir)
 
+        notify = QGroupBox("Notifications (D-Bus toasts)")
+        notify_layout = QVBoxLayout(notify)
+        self.notify_completed = QCheckBox(
+            "When an individual download completes"
+        )
+        self.notify_completed.setToolTip(
+            "Show a desktop toast (org.freedesktop.Notifications) for every\n"
+            "download that finishes successfully."
+        )
+        self.notify_all_done = QCheckBox(
+            "When all queued downloads have finished"
+        )
+        self.notify_all_done.setToolTip(
+            "Show one desktop toast when the queue drains — i.e. nothing is\n"
+            "queued, active, paused or waiting for a retry any more."
+        )
+        notify_layout.addWidget(self.notify_completed)
+        notify_layout.addWidget(self.notify_all_done)
+        layout.addWidget(notify)
+
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok
             | QDialogButtonBox.StandardButton.Cancel
@@ -97,6 +119,12 @@ class SettingsDialog(QDialog):
         self.initial_backoff.setValue(self._settings.get("initial_backoff", 5))
         self.max_backoff.setValue(self._settings.get("max_backoff", 300))
         self.output_dir.setText(self._settings.get("default_output_dir", ""))
+        self.notify_completed.setChecked(
+            bool(self._settings.get("notify_completed", True))
+        )
+        self.notify_all_done.setChecked(
+            bool(self._settings.get("notify_all_done", True))
+        )
 
     def _on_browse(self) -> None:
         directory = QFileDialog.getExistingDirectory(
@@ -112,4 +140,6 @@ class SettingsDialog(QDialog):
             "initial_backoff": self.initial_backoff.value(),
             "max_backoff": self.max_backoff.value(),
             "default_output_dir": self.output_dir.text().strip(),
+            "notify_completed": self.notify_completed.isChecked(),
+            "notify_all_done": self.notify_all_done.isChecked(),
         }

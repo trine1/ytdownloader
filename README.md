@@ -104,6 +104,14 @@ python -m yt_downloader
   automatically resumed next time. **Shift+Ctrl+Q** exits immediately without
   prompting (state is still saved).
 - **Help menu** shows the current version of the tool.
+- **Desktop toast notifications**: every finished download raises a toast, and a
+  second, separate toast fires once the whole queue has drained. Both go through
+  a **direct D-Bus call** to `org.freedesktop.Notifications` — the app opens the
+  session bus itself (SASL `EXTERNAL` authentication plus a hand-marshalled
+  method call), so no `dbus-python`/PyGObject dependency is added. Each toast has
+  its own on/off switch in **Settings → Preferences → Notifications** (both on by
+  default). Your desktop's Do Not Disturb mode suppresses the popups, as it
+  should.
 
 ### Keyboard shortcuts
 
