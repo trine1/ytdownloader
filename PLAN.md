@@ -899,6 +899,13 @@ Added to PLAN.md (Basic requirements + Features):
   env — the user's "installed tool reports 9.9.9". Both vars are now
   redirected; stale /tmp/ytd-uvhome-* envs removed; the shim re-pointed
   at the real 0.5.8 install and re-verified.
+- Test hygiene: every suite that constructs MainWindow now also
+  redirects ``history.HISTORY_FILE`` (they redirected only the state
+  file, so completion-emitting suites — toast, killer, xstate — had
+  been writing their fake ``Video Alpha``-style rows into the real
+  ``~/.local/share/ytdownloader/downloads.json``). The polluted file
+  was cleaned to the single genuine entry; re-running the full battery
+  left the real file byte-identical afterwards, proving the seal.
 - Suite now 76 checks (new: validation recorded on success, audio↔video
   switches free, all link shapes + bare ID hit the same proof, one entry
   per source across formats, label wording). The cross-restart E2E's
