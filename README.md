@@ -66,6 +66,14 @@ python -m yt_downloader
     again, or switch Format"*. Pressing **Download** is the "yes"; switching
     **Format** re-checks the source in the other format (which is usually the
     genuinely new one).
+  - if the source is **already being downloaded** (queued, running, paused or
+    waiting for a retry) then the app has already proven it and knows its
+    title, so it never re-validates: in the same format the label reads
+    *"Already downloading in audio format — wait for it, or switch Format for
+    the other one"*, and in the other format the title is accepted directly —
+    switching audio→video while the audio is still running costs no extra
+    check. Pressing Download for a format that is already downloading is
+    still refused with the duplicate notice.
   - if the same source **in the same format** was downloaded **recently**
     (within the last hour by default — configurable under
     **Settings → Preferences → URL validation**, `0` disables it), the

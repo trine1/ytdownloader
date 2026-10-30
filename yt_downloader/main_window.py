@@ -682,8 +682,8 @@ class MainWindow(QMainWindow):
 
         Sources compare canonically (watch?v=ID, youtu.be/ID, /shorts/ID
         all count as the same video), like the manager's own duplicate
-        detection. Only COMPLETED rows count — a queued or running item
-        is not a download yet.
+        detection. Only COMPLETED rows count — the live pools are handled
+        by _live_match.
         """
         needle = _canonical_source(url)
         for it in self._manager.completed_items():
@@ -691,6 +691,28 @@ class MainWindow(QMainWindow):
                 continue
             if it.url == url or _canonical_source(it.url) == needle:
                 return it
+        return None
+
+    def _live_match(self, url: str, kind: Optional[str] = None):
+        """An in-progress row for this source — queued, downloading,
+        paused or waiting for a retry — else None.
+
+        With *kind* given, only rows of that format match; with None any
+        format matches. The app already proved this source exists and
+        knows its title (that row is being downloaded from it right now),
+        so validation never needs the network for it, whatever format is
+        selected.
+        """
+        mgr = self._manager
+        needle = _canonical_source(url)
+        pools = (list(mgr.active_items()), mgr.queue_items(),
+                 list(mgr._paused_items), list(mgr._scheduled_retries))
+        for pool in pools:
+            for it in pool:
+                if kind is not None and it.kind != kind:
+                    continue
+                if it.url == url or _canonical_source(it.url) == needle:
+                    return it
         return None
 
     def _accept_local(self, url: str, title: str, label: str,
@@ -725,7 +747,38 @@ class MainWindow(QMainWindow):
             )
             return
 
-        # 2) Downloaded in this format recently (on-disk memory, survives
+        # 2) A row that is still being downloaded — queued, active, paused
+        #    or waiting for a retry — has already proved this source and
+        #    knows its title, so the network is just as needless here:
+        #      same format  -> enforce the duplicate notice instead of
+        #                      "validating" (pressing Download repeats the
+        #                      refusal that guarded the queue all along);
+        #      other format -> accept locally; the OTHER format is a
+        #                      genuine new download, no re-validation.
+        self._remembered_duplicate = None
+        live_same = self._live_match(text, kind)
+        if live_same is not None:
+            self._accept_local(
+                text,
+                live_same.title or live_same.url or text,
+                label=(f"Already downloading in {kind} format — wait for "
+                       f"it, or switch Format for the other one"),
+                style="color: #b06000; font-weight: bold;",
+            )
+            return
+        live_any = self._live_match(text, None)
+        if live_any is not None:
+            self._accept_local(
+                text,
+                live_any.title or live_any.url or text,
+                label=(f"✓  {live_any.title or live_any.url or text}"
+                       f"  (downloading {live_any.kind} now — no "
+                       f"re-validation needed)"),
+                style="color: #0a0; font-size: 13px; font-weight: bold;",
+            )
+            return
+
+        # 3) Downloaded in this format recently (on-disk memory, survives
         #    restarts)? Its title is known — skip the network round-trip.
         minutes = self._settings.get("validation_cache_minutes", 60)
         entry = self._history.recent_match(text, kind, minutes * 60)
@@ -740,7 +793,7 @@ class MainWindow(QMainWindow):
             )
             return
 
-        # 3) Otherwise ask YouTube (debounced, off-thread).
+        # 4) Otherwise ask YouTube (debounced, off-thread).
         self._remembered_duplicate = None
         self._validating_text = text
         self.validation_label.setText("Validating…")

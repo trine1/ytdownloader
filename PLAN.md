@@ -854,3 +854,25 @@ Added to PLAN.md (Basic requirements + Features):
   file) accepts the recent URLs without validation while still
   validating the other format, an old download, and an unknown URL. All
   previous suites re-run green.
+
+### Unreleased — in-progress rows skip validation too (2026-10-30)
+- Follow-up to the validation memory: the local-first check now also
+  covers rows **still being downloaded** (queued / active / paused /
+  waiting for a retry), not just completed ones or the on-disk history.
+  Such a row has already proved the source and holds its title, so:
+  - the SAME format as a live row → no network: "Already downloading in
+    <format> format — wait for it, or switch Format for the other one"
+    (pressing Download still hits the existing duplicate refusal);
+  - a DIFFERENT format than the live row → accepted locally with the
+    row's title — **bug fix**: switching audio→video while the audio was
+    still running used to re-validate the same ID through YouTube for
+    nothing.
+  The selected format is matched first, so when both formats of one
+  source are live at once the notice names the *chosen* one.
+- Order in `_run_validation`: completed row → live row → recent history
+  → network.
+- Suite: grew to 63 checks (same-format notice + no double queue, the bug
+  case, paused rows, both-formats-live race, unrelated URLs still
+  validated). Suite is also hermetic now: the manager's `_start_next` is
+  stubbed (an earlier run launched a REAL yt-dlp process!) and all modal
+  dialogs are recorded instead of shown.
