@@ -815,7 +815,7 @@ Added to PLAN.md (Basic requirements + Features):
   removed and the 0.5.7 installer purged from history, so again exactly
   one installer exists anywhere — the latest.
 
-### Unreleased — validation memory (2026-10-30)
+### v0.5.9 — smarter URL validation (2026-10-30)
 - New `yt_downloader/history.py` (`DownloadHistory`): an on-disk memory
   of completed downloads — source, format, title, timestamp, destination
   — in `downloads.json` next to `state.json` (atomic writes, versioned,
@@ -855,7 +855,7 @@ Added to PLAN.md (Basic requirements + Features):
   validating the other format, an old download, and an unknown URL. All
   previous suites re-run green.
 
-### Unreleased — in-progress rows skip validation too (2026-10-30)
+#### v0.5.9 (cont.) — in-progress rows skip validation too
 - Follow-up to the validation memory: the local-first check now also
   covers rows **still being downloaded** (queued / active / paused /
   waiting for a retry), not just completed ones or the on-disk history.
@@ -877,7 +877,7 @@ Added to PLAN.md (Basic requirements + Features):
   stubbed (an earlier run launched a REAL yt-dlp process!) and all modal
   dialogs are recorded instead of shown.
 
-### Unreleased — one validation per source, any format (2026-10-30)
+#### v0.5.9 (cont.) — one validation per source, any format
 - The proof-of-source cache is now **source-level, not per-format**, and
   records **successful validations as well as completed downloads**:
   yt-dlp resolves the title independently of the format, so validating an
@@ -910,3 +910,6 @@ Added to PLAN.md (Basic requirements + Features):
   switches free, all link shapes + bare ID hit the same proof, one entry
   per source across formats, label wording). The cross-restart E2E's
   other-format expectation flipped to SKIPPED accordingly.
+- Shipped as **v0.5.9**; the v0.5.8 release and local artifacts were
+  removed and its installer purged from history, so again exactly one
+  installer exists anywhere — the latest.
