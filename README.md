@@ -58,7 +58,21 @@ python -m yt_downloader
 
 - **Validation before download**: each URL/ID is validated immediately as you
   type and, once confirmed, the video's **full title** is shown so you can
-  verify it is the file you want.
+  verify it is the file you want. Validation is skipped when it would only
+  repeat what is already known:
+  - if the URL matches a download **still listed in the Downloads section in
+    the currently selected format**, no network check happens — the label
+    reads *"Already downloaded in audio format — press Download to get it
+    again, or switch Format"*. Pressing **Download** is the "yes"; switching
+    **Format** re-checks the source in the other format (which is usually the
+    genuinely new one).
+  - if the same source **in the same format** was downloaded **recently**
+    (within the last hour by default — configurable under
+    **Settings → Preferences → URL validation**, `0` disables it), the
+    remembered title is used and the label notes *"downloaded N ago — not
+    re-validated"*. This memory lives on disk
+    (`~/.local/share/ytdownloader/downloads.json`, next to `state.json`), so
+    it survives restarts; clearing the Downloads list does not erase it.
 - **Explicit start only**: nothing downloads until you press **Download**
   (starts immediately, ahead of items already waiting).
 - **Per-format downloads**: the same source can be downloaded in different
@@ -68,7 +82,9 @@ python -m yt_downloader
   existing or in-progress files.
 - **No duplicate downloads**: a source already queued or downloading in the
   same format is refused with a notice. A source already downloaded earlier
-  (or previously failed) is requested again with a confirmation dialog.
+  (or previously failed) is requested again with a confirmation dialog — and
+  when the duplicate is spotted already at validation time, that prompt is
+  the confirmation (press **Download**), so it is never asked twice.
 - **Pause downloads / Clear downloaded** sit underneath the Downloads list
   (right-aligned): pause pauses every active and pending item at once
   (persists across restart); clear removes only completed/failed items —
@@ -168,6 +184,12 @@ $XDG_DATA_HOME/ytdownloader/state.json
 (`~/.local/share/ytdownloader/state.json` by default). The file is written
 atomically (temp file + atomic rename) so a crash during saving never leaves a
 corrupt state file.
+
+Alongside it, `downloads.json` in the same directory remembers completed
+downloads (source, format, title, time) so that re-entering a recently
+downloaded URL skips re-validation — see **Settings → Preferences → URL
+validation**. It is also written atomically, is capped at 500 entries / 30
+days, and is not restored into the Downloads list (it is memory, not state).
 
 ## Packages
 

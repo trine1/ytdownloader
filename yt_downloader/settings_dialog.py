@@ -23,7 +23,8 @@ class SettingsDialog(QDialog):
 
     Returns a dict with keys:
         max_parallel, max_attempts, initial_backoff, max_backoff,
-        default_output_dir, notify_completed, notify_all_done, auto_update
+        default_output_dir, notify_completed, notify_all_done, auto_update,
+        validation_cache_minutes
     """
 
     def __init__(self, settings: dict, parent=None) -> None:
@@ -102,6 +103,24 @@ class SettingsDialog(QDialog):
         notify_layout.addWidget(self.notify_all_done)
         layout.addWidget(notify)
 
+        validation = QGroupBox("URL validation")
+        validation_grid = QGridLayout(validation)
+        self.validation_cache_minutes = QSpinBox()
+        self.validation_cache_minutes.setRange(0, 10_080)   # 0 .. 7 days
+        self.validation_cache_minutes.setSuffix(" minutes")
+        self.validation_cache_minutes.setToolTip(
+            "Skip re-validating a URL that was downloaded in this same\n"
+            "format within the last N minutes — the remembered title is\n"
+            "used instead of asking YouTube again. The memory lives in\n"
+            "downloads.json and survives restarts. 0 disables it, so\n"
+            "every URL is always validated from scratch."
+        )
+        validation_grid.addWidget(
+            QLabel("Trust a download for at most:"), 0, 0
+        )
+        validation_grid.addWidget(self.validation_cache_minutes, 0, 1)
+        layout.addWidget(validation)
+
         updates = QGroupBox("Updates")
         updates_layout = QVBoxLayout(updates)
         self.auto_update = QCheckBox(
@@ -145,6 +164,9 @@ class SettingsDialog(QDialog):
         self.auto_update.setChecked(
             bool(self._settings.get("auto_update", True))
         )
+        self.validation_cache_minutes.setValue(
+            int(self._settings.get("validation_cache_minutes", 60))
+        )
 
     def _on_browse(self) -> None:
         directory = QFileDialog.getExistingDirectory(
@@ -163,4 +185,5 @@ class SettingsDialog(QDialog):
             "notify_completed": self.notify_completed.isChecked(),
             "notify_all_done": self.notify_all_done.isChecked(),
             "auto_update": self.auto_update.isChecked(),
+            "validation_cache_minutes": self.validation_cache_minutes.value(),
         }

@@ -814,3 +814,43 @@ Added to PLAN.md (Basic requirements + Features):
 - Shipped as **v0.5.8**; the v0.5.7 release and local artifacts were
   removed and the 0.5.7 installer purged from history, so again exactly
   one installer exists anywhere — the latest.
+
+### Unreleased — validation memory (2026-10-30)
+- New `yt_downloader/history.py` (`DownloadHistory`): an on-disk memory
+  of completed downloads — source, format, title, timestamp, destination
+  — in `downloads.json` next to `state.json` (atomic writes, versioned,
+  capped at 500 entries / 30 days, corrupt or old files tolerated as
+  empty, damaged rows skipped individually). Sources compare with the
+  manager's canonical form (`watch?v=ID`, `youtu.be/ID`, `/shorts/ID`,
+  bare ID are one video), and audio/video are separate memories, like
+  everywhere else in the app. Survives restarts; deliberately independent
+  of the Downloads list (clearing rows does not erase the memory, and
+  the memory does not restore rows).
+- Validation is now local-first (`MainWindow._run_validation`):
+  1. If the URL matches a **completed row still showing in Downloads in
+     the selected format** → no network call: the label reads "Already
+     downloaded in audio format — press Download to get it again, or
+     switch Format", Download stays enabled and the row's title is
+     reused. Pressing Download *is* the answer, so `_confirm_download`
+     no longer asks a second time for that row.
+  2. Else if the same source+format was downloaded within the last
+     **`validation_cache_minutes` (default 60, 0 = off)** → no network
+     call: the remembered title is accepted, labelled "downloaded N ago
+     — not re-validated".
+  3. Else → the usual debounced, off-thread yt-dlp check.
+  Switching **Format** re-runs the check (the other format is usually
+  the genuinely new one). Completions are recorded into the memory as
+  they happen. A stale network answer for text that has since changed is
+  dropped, so it can never clobber a local accept.
+- New preference **Settings → Preferences → URL validation → "Trust a
+  download for at most: N minutes"**, default **60**.
+- Verified: new 55-check suite (`ytd-history-test.py`) — history
+  persistence/round-trip/corruption/caps/pruning, canonical matching
+  across all YouTube URL shapes, the per-format split, the zero window,
+  the inline prompt (and that Download does not double-confirm), the
+  format switch re-check, stale-answer dropping, and the preference
+  round-trip. Plus a cross-restart E2E with the *installed* tool: one
+  process records downloads, a second process (fresh interpreter, same
+  file) accepts the recent URLs without validation while still
+  validating the other format, an old download, and an unknown URL. All
+  previous suites re-run green.

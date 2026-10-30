@@ -8,6 +8,7 @@ import os
 import platform
 import sys
 import threading
+import time
 import traceback
 from typing import Dict, List, Optional
 
@@ -32,7 +33,8 @@ from PyQt6.QtWidgets import (
 
 from . import __version__ as APP_VERSION
 from . import dbus_notify, updater
-from .manager import DownloadManager
+from .history import DownloadHistory
+from .manager import DownloadManager, _canonical_source
 from .settings_dialog import SettingsDialog
 from .state import _item_from_dict, load_state, save_state
 from .worker import DownloadItem, ffmpeg_version, format_seconds, ytdlp_source, ytdlp_version
@@ -414,6 +416,10 @@ class MainWindow(QMainWindow):
             # Preferences -> Updates). Opt out there, or per-run with
             # YTDOWNLOADER_NO_UPDATE=1.
             "auto_update": True,
+            # Minutes within which a URL that was already downloaded (in
+            # the same format) skips re-validation (Settings ->
+            # Preferences -> URL validation). 0 = always validate.
+            "validation_cache_minutes": 60,
         }
 
         self._validated_url: Optional[str] = None
@@ -432,6 +438,16 @@ class MainWindow(QMainWindow):
         self._update_checked = False     # startup check already happened
         self._update_pending_idle = False  # install deferred until queue drains
         self._update_manual = False      # current check was Help-menu triggered
+
+        # On-disk memory of completed downloads: lets validation skip the
+        # network for a URL downloaded recently (Settings -> Preferences
+        # -> URL validation). Survives restarts.
+        self._history = DownloadHistory()
+        # Completed row already flagged as "downloaded in this format" at
+        # validation time — its Download click IS the "yes, again" answer.
+        self._remembered_duplicate = None
+        # Text a network validation was started for (stale answers dropped).
+        self._validating_text: str = ""
 
         self._manager = DownloadManager()
         self._manager.configure(**{
@@ -596,6 +612,7 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ signals
     def _connect_signals(self) -> None:
         self.url_input.textChanged.connect(self._on_url_changed)
+        self.format_combo.currentIndexChanged.connect(self._on_format_changed)
         self.browse_btn.clicked.connect(self._on_browse)
         self.download_btn.clicked.connect(self._on_download_now)
         self.pause_all_btn.clicked.connect(self._on_pause_all)
@@ -642,6 +659,7 @@ class MainWindow(QMainWindow):
     def _on_url_changed(self, text: str) -> None:
         self._validated_url = None
         self._validated_title = None
+        self._remembered_duplicate = None
         self.validation_label.setText("Enter a URL or ID to validate")
         self.validation_label.setStyleSheet("color: #666; font-style: italic;")
         self.download_btn.setEnabled(False)
@@ -649,16 +667,106 @@ class MainWindow(QMainWindow):
             self._validation_timer.start()
 
     @_safe_slot
+    def _on_format_changed(self) -> None:
+        """Re-check the current URL against the newly selected format.
+
+        The "already downloaded" memory is per (source, format), so
+        switching Format audio→video must re-evaluate: the other format
+        may well be genuinely new.
+        """
+        if self.url_input.text().strip():
+            self._validation_timer.start()
+
+    def _completed_match(self, url: str, kind: str):
+        """A completed row still showing in Downloads for this source+format.
+
+        Sources compare canonically (watch?v=ID, youtu.be/ID, /shorts/ID
+        all count as the same video), like the manager's own duplicate
+        detection. Only COMPLETED rows count — a queued or running item
+        is not a download yet.
+        """
+        needle = _canonical_source(url)
+        for it in self._manager.completed_items():
+            if it.kind != kind:
+                continue
+            if it.url == url or _canonical_source(it.url) == needle:
+                return it
+        return None
+
+    def _accept_local(self, url: str, title: str, label: str,
+                      style: str) -> None:
+        """Mark *url* validated from local knowledge — no network needed."""
+        self._validated_url = url
+        self._validated_title = title
+        self.validation_label.setText(label)
+        self.validation_label.setStyleSheet(style)
+        self.download_btn.setEnabled(bool(self.url_input.text().strip()))
+
+    @_safe_slot
     def _run_validation(self) -> None:
         text = self.url_input.text().strip()
         if not text:
             return
+        kind = self.format_combo.currentData()
+
+        # 1) Still showing in the Downloads list as a completed row, in
+        #    this very format? Then there is nothing to validate: reuse
+        #    the row's title and ask inline whether to download again.
+        #    (Switching Format re-runs this check for the other kind.)
+        existing = self._completed_match(text, kind)
+        if existing is not None:
+            self._remembered_duplicate = existing
+            self._accept_local(
+                text,
+                existing.title or text,
+                label=(f"Already downloaded in {kind} format — press Download "
+                       f"to get it again, or switch Format"),
+                style="color: #b06000; font-weight: bold;",
+            )
+            return
+
+        # 2) Downloaded in this format recently (on-disk memory, survives
+        #    restarts)? Its title is known — skip the network round-trip.
+        minutes = self._settings.get("validation_cache_minutes", 60)
+        entry = self._history.recent_match(text, kind, minutes * 60)
+        if entry is not None:
+            self._remembered_duplicate = None
+            self._accept_local(
+                text,
+                entry.title or text,
+                label=(f"✓  {entry.title or text}"
+                       f"  (downloaded {self._ago(entry.at)} — not re-validated)"),
+                style="color: #0a0; font-size: 13px; font-weight: bold;",
+            )
+            return
+
+        # 3) Otherwise ask YouTube (debounced, off-thread).
+        self._remembered_duplicate = None
+        self._validating_text = text
         self.validation_label.setText("Validating…")
         self.validation_label.setStyleSheet("color: #666; font-style: italic;")
         self._manager.validate(text)
 
+    @staticmethod
+    def _ago(when: float) -> str:
+        """Short human phrase for a timestamp in the past."""
+        seconds = max(0, int(time.time() - when))
+        if seconds < 60:
+            return "just now"
+        if seconds < 3600:
+            return f"{seconds // 60} min ago"
+        if seconds < 86400:
+            return f"{seconds // 3600} h ago"
+        return f"{seconds // 86400} d ago"
+
     @_safe_slot
     def _on_validated(self, ok: bool, resolved_url: str, title_or_error: str) -> None:
+        # Ignore an answer for text that is no longer in the box: the user
+        # may have edited the URL (or pasted one that was accepted locally)
+        # while this network check was still in flight.
+        if self.url_input.text().strip() != self._validating_text:
+            return
+        self._remembered_duplicate = None   # a fresh answer supersedes it
         if ok:
             self._validated_url = resolved_url
             self._validated_title = title_or_error
@@ -709,6 +817,13 @@ class MainWindow(QMainWindow):
         if existing is None:
             return True
         if existing in self._manager.completed_items():
+            # Validation already flagged this exact row as "downloaded in
+            # <kind> format — press Download to get it again", so the
+            # click that got us here IS the answer: don't ask a second
+            # time. (A completed row never flagged at validation time —
+            # e.g. added programmatically — still gets the question.)
+            if existing is self._remembered_duplicate:
+                return True
             reply = QMessageBox.question(
                 self, "Already downloaded",
                 f"This source has already been downloaded\n"
@@ -739,6 +854,7 @@ class MainWindow(QMainWindow):
         self.url_input.clear()
         self._validated_url = None
         self._validated_title = None
+        self._remembered_duplicate = None
         self.download_btn.setEnabled(False)
         self.validation_label.setText("Enter a URL or ID to validate")
         self.validation_label.setStyleSheet("color: #666; font-style: italic;")
@@ -860,6 +976,10 @@ class MainWindow(QMainWindow):
     @_safe_slot
     def _on_item_completed(self, item: DownloadItem, destination: str) -> None:
         self._batch_completed += 1
+        # Remember it on disk: the next validation of the same source in
+        # the same format can skip the network round-trip.
+        self._history.record(item.url, item.kind, title=item.title,
+                             destination=destination)
         self._refresh_downloads()
         # Toast for this one download (Settings -> Preferences -> Notifications).
         if self._settings.get("notify_completed"):
@@ -926,7 +1046,8 @@ class MainWindow(QMainWindow):
         saved = payload.get("settings", {})
         for key in ("max_parallel", "max_attempts", "initial_backoff",
                     "max_backoff", "default_output_dir",
-                    "notify_completed", "notify_all_done", "auto_update"):
+                    "notify_completed", "notify_all_done", "auto_update",
+                    "validation_cache_minutes"):
             if key in saved:
                 self._settings[key] = saved[key]
         self.output_input.setText(self._settings["default_output_dir"])
