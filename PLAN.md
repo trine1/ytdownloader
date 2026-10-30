@@ -766,3 +766,48 @@ Added to PLAN.md (Basic requirements + Features):
 - Shipped as **v0.5.7**; the same purge was then repeated for the 0.5.6
   installer so that the tree, the release, and *every commit and tag* hold
   exactly one installer — the latest.
+
+### Unreleased — automatic updates (2026-10-30)
+- New `yt_downloader/updater.py` (stdlib only: urllib/hashlib/tarfile/
+  subprocess — the tool still has exactly two dependencies, PyQt6 +
+  yt-dlp). Checks `api.github.com/.../releases/latest`, compares the tag
+  to `__version__` numerically, downloads the release, and installs it
+  over the running copy:
+  - **installer** strategy (`<prefix>/share/ytdownloader/venv`): download
+    the release's self-extracting installer, verify it against the
+    release's `SHA256SUMS.txt`, re-run it with the same `--prefix`.
+  - **uv** strategy (`…/uv/tools/<name>`): download the tagged source
+    archive (path-traversal/ symlink safe extraction), then
+    `uv tool install --force <dir>`.
+  - **system** (`/usr`, `/usr/local`) and **source** installs only
+    *report* the update — they need root or a human.
+  - Statuses: `up-to-date` / `updated` / `available` / `error`.
+    `auto_update()` never raises; every failure becomes an `error` result.
+- GUI wiring (`main_window.py`): a startup `QTimer.singleShot(5000, …)`
+  tick re-reads both the `auto_update` preference and the
+  `YTDOWNLOADER_NO_UPDATE` env var at fire time, so flipping the switch
+  takes effect without a restart. The check runs on a daemon thread and
+  reports back through an `update_result` signal (dialogs only ever on
+  the GUI thread). Auto-path noise policy: `up-to-date` and `error` are
+  silent, `available` is a toast + status line (system/source installs),
+  `updated` offers **Restart now / Later** (`os.execv` re-exec of
+  `python -m yt_downloader`). The install is deferred while anything is
+  queued/active/paused/retrying and fires when the queue drains (once per
+  session). A *manual* check while downloads run asks first, since
+  replacing files under a live yt-dlp can break it.
+- New preference **Settings → Preferences → Updates → "Check for a newer
+  version at startup and install it"**, default **on**; persisted through
+  `state.json` like the other preferences. Manual check: **Help → Check
+  for updates…** (always reports its outcome).
+- Verified: new 55-check suite (`ytd-updater-test.py`) — version maths,
+  all four strategies, sha256 good/bad/missing, `check_latest` against a
+  localhost server (valid/invalid JSON/404/unreachable), a fake-installer
+  end-to-end (download → verify → `--prefix`), a real `uv` install from
+  a locally-built tarball, all `auto_update` statuses, and the full GUI
+  wiring (defaults, dialog round-trip, `_load_state`, signal→slot, the
+  idle-defer hook, the env/preference gates). Plus a true self-update
+  E2E: the *installed* tool updated *itself* over the real uv tool dir
+  with the real `uv` binary (release feed and tarball served locally),
+  then the restored install re-verified. All previous suites re-run with
+  `YTDOWNLOADER_NO_UPDATE=1` (smoke, width, row-buttons, uicheck, toast,
+  slot-arg, yt-dlp, killer + the 7-state X reproducer) — green.

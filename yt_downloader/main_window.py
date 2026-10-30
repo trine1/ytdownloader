@@ -6,10 +6,12 @@ import functools
 import inspect
 import os
 import platform
+import sys
+import threading
 import traceback
 from typing import Dict, List, Optional
 
-from PyQt6.QtCore import QTimer, Qt
+from PyQt6.QtCore import QTimer, Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -29,7 +31,7 @@ from PyQt6.QtWidgets import (
 )
 
 from . import __version__ as APP_VERSION
-from . import dbus_notify
+from . import dbus_notify, updater
 from .manager import DownloadManager
 from .settings_dialog import SettingsDialog
 from .state import _item_from_dict, load_state, save_state
@@ -390,6 +392,10 @@ class DownloadsCanvas(QWidget):
 
 
 class MainWindow(QMainWindow):
+    # (status, message, version) — emitted by the off-thread update check,
+    # handled on the GUI thread by _on_update_result.
+    update_result = pyqtSignal(str, str, str)
+
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle(f"{APP_TITLE} v{APP_VERSION}")
@@ -404,6 +410,10 @@ class MainWindow(QMainWindow):
             # Desktop toasts (Settings -> Preferences -> Notifications).
             "notify_completed": True,
             "notify_all_done": True,
+            # Self-update from GitHub Releases at startup (Settings ->
+            # Preferences -> Updates). Opt out there, or per-run with
+            # YTDOWNLOADER_NO_UPDATE=1.
+            "auto_update": True,
         }
 
         self._validated_url: Optional[str] = None
@@ -416,6 +426,12 @@ class MainWindow(QMainWindow):
         self._batch_pending = False
         self._batch_completed = 0
         self._batch_failed = 0
+
+        # Update bookkeeping (Settings -> Preferences -> Updates).
+        self._update_running = False     # a check/install is in flight
+        self._update_checked = False     # startup check already happened
+        self._update_pending_idle = False  # install deferred until queue drains
+        self._update_manual = False      # current check was Help-menu triggered
 
         self._manager = DownloadManager()
         self._manager.configure(**{
@@ -446,6 +462,14 @@ class MainWindow(QMainWindow):
         # Load persisted state.
         self._load_state()
 
+        # Automatic update check, shortly after startup so the window has
+        # painted first. Both the preference and the env opt-out are
+        # re-read when the timer actually fires, so flipping the switch in
+        # Preferences (or exporting YTDOWNLOADER_NO_UPDATE=1 for a
+        # packager/test run) takes effect without a restart.
+        if not os.environ.get("YTDOWNLOADER_NO_UPDATE"):
+            QTimer.singleShot(5_000, self._auto_update_tick)
+
     # ------------------------------------------------------------------ UI
     def _build_ui(self) -> None:
         central = QWidget()
@@ -470,6 +494,11 @@ class MainWindow(QMainWindow):
         version_action = help_menu.addAction("&Version")
         version_action.setStatusTip("Show the current version of this tool")
         version_action.triggered.connect(self._show_version)
+        check_action = help_menu.addAction("&Check for updates…")
+        check_action.setStatusTip(
+            "Check GitHub for a newer version and install it if there is one"
+        )
+        check_action.triggered.connect(self._check_for_updates)
 
         # ---- Source -------------------------------------------------------
         src_row = QHBoxLayout()
@@ -586,6 +615,10 @@ class MainWindow(QMainWindow):
         self._manager.queue_changed.connect(self._save_state)
         self._manager.item_started.connect(self._save_state)
         self._manager.item_finished.connect(self._save_state)
+
+        # Update checks run off-thread; results come back via a signal so
+        # every dialog happens on the GUI thread.
+        self.update_result.connect(self._on_update_result)
 
     # ------------------------------------------------------------------ settings
     @_safe_slot
@@ -846,6 +879,11 @@ class MainWindow(QMainWindow):
         if live:
             self._batch_pending = True
             return
+        # The queue just went idle: if the startup update was deferred
+        # because downloads were running, do it now (once per session).
+        if self._update_pending_idle:
+            self._update_pending_idle = False
+            QTimer.singleShot(0, self._auto_update_tick)
         if not self._batch_pending:
             return
         self._batch_pending = False
@@ -888,7 +926,7 @@ class MainWindow(QMainWindow):
         saved = payload.get("settings", {})
         for key in ("max_parallel", "max_attempts", "initial_backoff",
                     "max_backoff", "default_output_dir",
-                    "notify_completed", "notify_all_done"):
+                    "notify_completed", "notify_all_done", "auto_update"):
             if key in saved:
                 self._settings[key] = saved[key]
         self.output_input.setText(self._settings["default_output_dir"])
@@ -923,6 +961,147 @@ class MainWindow(QMainWindow):
             f"Python        {platform.python_version()}\n\n"
             f"A Qt graphical YouTube downloader powered by yt-dlp.",
         )
+
+    # ------------------------------------------------------------------ updates
+    def _auto_update_tick(self) -> None:
+        """Startup update tick — re-reads the preference at fire time."""
+        if os.environ.get("YTDOWNLOADER_NO_UPDATE"):
+            return
+        if not self._settings.get("auto_update", True):
+            return
+        self._run_update_check(manual=False)
+
+    @_safe_slot
+    def _check_for_updates(self) -> None:
+        """Help -> Check for updates… — always reports its outcome."""
+        self._run_update_check(manual=True)
+
+    def _run_update_check(self, manual: bool) -> None:
+        """Kick off the (off-thread) update check. Never blocks the GUI."""
+        if self._update_running:
+            if manual:
+                QMessageBox.information(
+                    self,
+                    f"{APP_TITLE} — Updates",
+                    "An update check is already running.",
+                )
+            return
+        busy = bool(
+            self._manager.active_items()
+            or self._manager.queue_items()
+            or self._manager._paused_items
+            or self._manager._scheduled_retries
+        )
+        if busy and not manual:
+            # Never touch the install out from under running downloads:
+            # defer until the queue drains (once per session).
+            self._update_pending_idle = True
+            self._set_status("Update check deferred until downloads finish")
+            return
+        if busy and manual:
+            reply = QMessageBox.question(
+                self,
+                f"{APP_TITLE} — Downloads running",
+                "Downloads are still running.\n\n"
+                "Installing an update replaces this program's files while "
+                "yt-dlp is using them, which can break the running "
+                "downloads.\n\n"
+                "Check and install the update anyway?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+        self._update_running = True
+        self._update_manual = manual
+        if manual:
+            self._set_status("Checking for updates…")
+        threading.Thread(
+            target=self._update_worker,
+            name="ytd-updater",
+            daemon=True,
+        ).start()
+
+    def _update_worker(self) -> None:
+        """Thread target: check GitHub and (maybe) install. Never raises."""
+        result = updater.auto_update()
+        self.update_result.emit(result.status, result.message, result.version)
+
+    @_safe_slot
+    def _on_update_result(self, status: str, message: str, version: str) -> None:
+        self._update_running = False
+        self._update_checked = True
+        manual = self._update_manual
+        self._update_manual = False
+
+        if status == "updated":
+            label = version or "the new version"
+            reply = QMessageBox.question(
+                self,
+                f"{APP_TITLE} — Updated",
+                f"{message}\n\n"
+                f"Restart {APP_TITLE} now to start using {label}?\n\n"
+                "Your queue is saved and will be resumed.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes,
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self._restart_app()
+            else:
+                self._set_status(
+                    f"Updated to {label} — restart to start using it"
+                )
+            return
+
+        if status == "available":
+            if manual:
+                QMessageBox.information(
+                    self, f"{APP_TITLE} — Update available", message
+                )
+            else:
+                # Quiet on auto-check: a toast is enough for a system-wide
+                # install that can't self-update.
+                dbus_notify.notify_async("Update available", message)
+                self._set_status(f"Update available: {message}")
+            return
+
+        if status == "error":
+            if manual:
+                QMessageBox.warning(
+                    self, f"{APP_TITLE} — Update check failed", message
+                )
+            # Auto-check failures stay quiet: offline, rate-limited, …
+            return
+
+        # status == "up-to-date"
+        if manual:
+            QMessageBox.information(
+                self,
+                f"{APP_TITLE} — Up to date",
+                f"You are running the newest version ({APP_VERSION}).",
+            )
+        self._set_status("Ready")
+
+    def _restart_app(self) -> None:
+        """Re-exec this process so a freshly installed update takes over."""
+        self._force_quit = True
+        self._closing = True
+        self._save_state()
+        self._manager.clear_queue()
+        args = [sys.executable, "-m", "yt_downloader", *sys.argv[1:]]
+        try:
+            os.execv(sys.executable, args)
+        except OSError as exc:
+            # exec failed: carry on with the old copy and say so.
+            self._force_quit = False
+            self._closing = False
+            QMessageBox.warning(
+                self,
+                f"{APP_TITLE} — Restart failed",
+                f"The update was installed, but this copy could not be\n"
+                f"restarted automatically: {exc}\n\n"
+                f"Please start {APP_TITLE} again manually.",
+            )
 
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt override name
         self._save_state()

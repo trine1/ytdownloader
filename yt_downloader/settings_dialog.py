@@ -1,4 +1,4 @@
-"""Settings dialog: retry backoff, parallel downloads, default output dir."""
+"""Settings dialog: retry backoff, downloads, output dir, toasts, updates."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ class SettingsDialog(QDialog):
 
     Returns a dict with keys:
         max_parallel, max_attempts, initial_backoff, max_backoff,
-        default_output_dir, notify_completed, notify_all_done
+        default_output_dir, notify_completed, notify_all_done, auto_update
     """
 
     def __init__(self, settings: dict, parent=None) -> None:
@@ -102,6 +102,23 @@ class SettingsDialog(QDialog):
         notify_layout.addWidget(self.notify_all_done)
         layout.addWidget(notify)
 
+        updates = QGroupBox("Updates")
+        updates_layout = QVBoxLayout(updates)
+        self.auto_update = QCheckBox(
+            "Check for a newer version at startup and install it"
+        )
+        self.auto_update.setToolTip(
+            "On startup, ask GitHub for the newest release of this tool.\n"
+            "When one is newer than this copy and nothing is downloading,\n"
+            "download it (checksum-verified) and install it over the current\n"
+            "one, then offer to restart. Installs made by the standalone\n"
+            "installer or with `uv tool install` update themselves; system-\n"
+            "wide (.deb) installs are only reported, since they need root.\n"
+            "You can also check manually via Help → Check for updates…"
+        )
+        updates_layout.addWidget(self.auto_update)
+        layout.addWidget(updates)
+
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok
             | QDialogButtonBox.StandardButton.Cancel
@@ -125,6 +142,9 @@ class SettingsDialog(QDialog):
         self.notify_all_done.setChecked(
             bool(self._settings.get("notify_all_done", True))
         )
+        self.auto_update.setChecked(
+            bool(self._settings.get("auto_update", True))
+        )
 
     def _on_browse(self) -> None:
         directory = QFileDialog.getExistingDirectory(
@@ -142,4 +162,5 @@ class SettingsDialog(QDialog):
             "default_output_dir": self.output_dir.text().strip(),
             "notify_completed": self.notify_completed.isChecked(),
             "notify_all_done": self.notify_all_done.isChecked(),
+            "auto_update": self.auto_update.isChecked(),
         }

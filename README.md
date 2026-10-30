@@ -131,6 +131,24 @@ python -m yt_downloader
   its own on/off switch in **Settings → Preferences → Notifications** (both on by
   default). Your desktop's Do Not Disturb mode suppresses the popups, as it
   should.
+- **Automatic updates**: about five seconds after startup the app asks GitHub
+  Releases for the newest version and, if it is newer, downloads it
+  (**SHA256-verified** against the release's `SHA256SUMS.txt`), installs it
+  over the running copy, and offers to restart. It never interrupts work: the
+  install waits until the queue has fully drained, and happens at most once per
+  session. How it installs depends on how you installed it:
+
+  | Install method | What the updater does |
+  |----------------|----------------------|
+  | Standalone installer | Re-runs the downloaded installer with the same `--prefix` (keeps your `state.json`) |
+  | `uv tool install` | Extracts the tagged source archive and runs `uv tool install --force` |
+  | `.deb` / system-wide | Reports the update only — install the new `.deb` with your package manager (needs root) |
+  | Source checkout | Reports the update only — `git pull`, then `uv tool install --force .` |
+
+  Turn it off in **Settings → Preferences → Updates** (it is on by default),
+  skip a single run with `YTDOWNLOADER_NO_UPDATE=1`, or check manually any time
+  via **Help → Check for updates…**. Failures (offline, rate-limited, …) are
+  silent on the automatic path and never take the app down.
 
 ### Keyboard shortcuts
 
