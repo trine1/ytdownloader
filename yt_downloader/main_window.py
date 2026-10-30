@@ -778,17 +778,20 @@ class MainWindow(QMainWindow):
             )
             return
 
-        # 3) Downloaded in this format recently (on-disk memory, survives
-        #    restarts)? Its title is known — skip the network round-trip.
+        # 3) This SOURCE already proved recently (validated or downloaded,
+        #    any format — the on-disk memory, survives restarts)? Its
+        #    title is known; validation only needs to happen once per
+        #    source within the window, not once per format.
         minutes = self._settings.get("validation_cache_minutes", 60)
-        entry = self._history.recent_match(text, kind, minutes * 60)
+        entry = self._history.recent_match(text, minutes * 60)
         if entry is not None:
             self._remembered_duplicate = None
+            proven = "downloaded" if entry.destination else "validated"
             self._accept_local(
                 text,
                 entry.title or text,
                 label=(f"✓  {entry.title or text}"
-                       f"  (downloaded {self._ago(entry.at)} — not re-validated)"),
+                       f"  ({proven} {self._ago(entry.at)} — not re-validated)"),
                 style="color: #0a0; font-size: 13px; font-weight: bold;",
             )
             return
@@ -821,6 +824,14 @@ class MainWindow(QMainWindow):
             return
         self._remembered_duplicate = None   # a fresh answer supersedes it
         if ok:
+            # Remember this proof: within the window, re-validating this
+            # source (in ANY format) would only ask YouTube the same
+            # question again. Validation result first, destination empty.
+            self._history.record(
+                resolved_url,
+                self.format_combo.currentData() or "audio",
+                title=title_or_error,
+            )
             self._validated_url = resolved_url
             self._validated_title = title_or_error
             self.validation_label.setText(f"✓  {title_or_error}")

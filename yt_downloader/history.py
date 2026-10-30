@@ -1,19 +1,18 @@
-"""On-disk memory of recently completed downloads.
+"""On-disk memory of validated and completed downloads.
 
 Validating a pasted URL costs a network round-trip: yt-dlp has to resolve
-the source and fetch its title. That work is wasted when the very same
-source **in the same format** was downloaded minutes ago — and equally
-wasted when the download is still sitting in the Downloads list (its row
-already knows the title).
+the source and fetch its title. That work is wasted once the same SOURCE
+has been proved — a title is true for every format, so validating audio
+also proves video. This module remembers which sources the app has already
+validated (or downloaded), and since the memory lives on disk it survives
+restarts.
 
 This module answers exactly one question, locally and instantly::
 
-    was this source, in this format, downloaded recently?
+    has this source been proved recently, and what is its title?
 
-The memory lives in ``downloads.json`` next to ``state.json`` so it
-survives restarts. It is deliberately *not* the downloads list: clearing
-completed rows in the UI does not forget the history, and the history
-does not restore rows.
+It is deliberately *not* the downloads list: clearing completed rows in
+the UI does not forget the history, and the history does not restore rows.
 
 Writes are atomic (temp file + rename), the same pattern as state.json.
 """
@@ -51,7 +50,11 @@ class HistoryEntry:
 
 
 class DownloadHistory:
-    """Persistent record of completed downloads, queried by source+format."""
+    """Persistent record of proved sources, queried by source alone.
+
+    ``kind`` is carried on every entry (it labels future messages), but
+    identity and matching are per SOURCE: one proof covers every format.
+    """
 
     def __init__(self, path: Optional[Path] = None) -> None:
         # Resolved at call time (not as a default argument) so tests can
@@ -64,15 +67,17 @@ class DownloadHistory:
     def recent_match(
         self,
         url: str,
-        kind: str,
         within_seconds: float,
         now: Optional[float] = None,
     ) -> Optional[HistoryEntry]:
-        """Entry for the same source+format downloaded within the window.
+        """Entry for the same source recorded within the window.
 
         Sources compare canonically (watch?v=ID, youtu.be/ID, /shorts/ID
-        and m.youtube.com all count as the same video). A non-positive
-        window disables the cache: nothing ever matches.
+        and m.youtube.com all count as the same video). Format does NOT
+        matter: what this answers is "has the app already proved this
+        source and fetched its title recently?" — a fact true for every
+        format. A non-positive window disables the cache: nothing ever
+        matches.
         """
         if within_seconds <= 0:
             return None
@@ -80,8 +85,6 @@ class DownloadHistory:
         needle = _canonical_source(url)
         best: Optional[HistoryEntry] = None
         for entry in self._entries:
-            if entry.kind != kind:
-                continue
             if not (entry.url == url or _canonical_source(entry.url) == needle):
                 continue
             if now - entry.at > within_seconds:
@@ -99,14 +102,17 @@ class DownloadHistory:
         destination: str = "",
         now: Optional[float] = None,
     ) -> HistoryEntry:
-        """Remember a completed download and persist the cache."""
+        """Remember that *url* was validated or downloaded, and persist.
+
+        One entry per source (any format): the newest record replaces the
+        previous one, keeping the freshest title and timestamp. The kind
+        is retained only so callers can word their messages precisely.
+        """
         now = time.time() if now is None else now
         needle = _canonical_source(url)
-        # One entry per (source, format): refresh rather than duplicate.
         self._entries = [
             e for e in self._entries
-            if not (e.kind == kind
-                    and (e.url == url or _canonical_source(e.url) == needle))
+            if not (e.url == url or _canonical_source(e.url) == needle)
         ]
         entry = HistoryEntry(url=url, kind=kind, title=title or "", at=now,
                              destination=destination or "")

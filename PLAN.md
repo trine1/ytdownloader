@@ -876,3 +876,30 @@ Added to PLAN.md (Basic requirements + Features):
   validated). Suite is also hermetic now: the manager's `_start_next` is
   stubbed (an earlier run launched a REAL yt-dlp process!) and all modal
   dialogs are recorded instead of shown.
+
+### Unreleased — one validation per source, any format (2026-10-30)
+- The proof-of-source cache is now **source-level, not per-format**, and
+  records **successful validations as well as completed downloads**:
+  yt-dlp resolves the title independently of the format, so validating an
+  ID once proves it for audio *and* video. Entering the same source
+  (any link shape, any format) within `validation_cache_minutes` reuses
+  the remembered title — the reported bug was that switching the Format
+  combo after validating re-hit YouTube every time.
+  - `DownloadHistory.recent_match(url, within)` dropped its `kind`
+    parameter; `record()` dedupes per source (newest wins; the kind is
+    still stored for labelling).
+  - `_on_validated` records the proof when a network validation succeeds
+    (destination empty ⇒ the label says "validated N ago", a completed
+    download still says "downloaded N ago").
+  - Check order: completed row (same format, re-download prompt) → live
+    row → source proof → network.
+- Test-suite fix: the updater suite's real `uv tool install` redirected
+  `UV_TOOL_DIR` but not `UV_TOOL_BIN_DIR`, so every suite run rewrote
+  `~/.local/bin/ytdownloader` to point at the throwaway **9.9.9** test
+  env — the user's "installed tool reports 9.9.9". Both vars are now
+  redirected; stale /tmp/ytd-uvhome-* envs removed; the shim re-pointed
+  at the real 0.5.8 install and re-verified.
+- Suite now 76 checks (new: validation recorded on success, audio↔video
+  switches free, all link shapes + bare ID hit the same proof, one entry
+  per source across formats, label wording). The cross-restart E2E's
+  other-format expectation flipped to SKIPPED accordingly.

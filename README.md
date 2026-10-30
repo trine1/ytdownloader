@@ -64,8 +64,8 @@ python -m yt_downloader
     the currently selected format**, no network check happens — the label
     reads *"Already downloaded in audio format — press Download to get it
     again, or switch Format"*. Pressing **Download** is the "yes"; switching
-    **Format** re-checks the source in the other format (which is usually the
-    genuinely new one).
+    **Format** accepts the other format from the source's stored proof
+    instead of asking YouTube again.
   - if the source is **already being downloaded** (queued, running, paused or
     waiting for a retry) then the app has already proven it and knows its
     title, so it never re-validates: in the same format the label reads
@@ -74,11 +74,14 @@ python -m yt_downloader
     switching audio→video while the audio is still running costs no extra
     check. Pressing Download for a format that is already downloading is
     still refused with the duplicate notice.
-  - if the same source **in the same format** was downloaded **recently**
-    (within the last hour by default — configurable under
-    **Settings → Preferences → URL validation**, `0` disables it), the
-    remembered title is used and the label notes *"downloaded N ago — not
-    re-validated"*. This memory lives on disk
+  - once a source has been **validated or downloaded successfully**, that
+    proof is remembered **for the source, in any format**, for the last hour
+    (default — configurable under **Settings → Preferences → URL validation**,
+    `0` disables it). Entering the same ID/URL again — in either format, in
+    any of its link shapes — reuses the remembered title instead of
+    re-hitting YouTube: *"✓ Never Gonna Give You Up (validated 12 min ago —
+    not re-validated)"*. One validation per source per window is all it
+    takes. This memory lives on disk
     (`~/.local/share/ytdownloader/downloads.json`, next to `state.json`), so
     it survives restarts; clearing the Downloads list does not erase it.
 - **Explicit start only**: nothing downloads until you press **Download**
@@ -193,11 +196,12 @@ $XDG_DATA_HOME/ytdownloader/state.json
 atomically (temp file + atomic rename) so a crash during saving never leaves a
 corrupt state file.
 
-Alongside it, `downloads.json` in the same directory remembers completed
-downloads (source, format, title, time) so that re-entering a recently
-downloaded URL skips re-validation — see **Settings → Preferences → URL
-validation**. It is also written atomically, is capped at 500 entries / 30
-days, and is not restored into the Downloads list (it is memory, not state).
+Alongside it, `downloads.json` in the same directory remembers the sources
+the app has already proved (successful validations and completed downloads:
+source, title, time) so that re-entering one within the URL-validation window
+skips the network check — see **Settings → Preferences → URL validation**. It
+is also written atomically, is capped at 500 entries / 30 days, and is not
+restored into the Downloads list (it is memory, not state).
 
 ## Packages
 

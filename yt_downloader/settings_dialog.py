@@ -109,11 +109,12 @@ class SettingsDialog(QDialog):
         self.validation_cache_minutes.setRange(0, 10_080)   # 0 .. 7 days
         self.validation_cache_minutes.setSuffix(" minutes")
         self.validation_cache_minutes.setToolTip(
-            "Skip re-validating a URL that was downloaded in this same\n"
-            "format within the last N minutes — the remembered title is\n"
-            "used instead of asking YouTube again. The memory lives in\n"
-            "downloads.json and survives restarts. 0 disables it, so\n"
-            "every URL is always validated from scratch."
+            "Skip re-validating a URL that was already validated or\n"
+            "downloaded — in ANY format — within this many minutes: one\n"
+            "proof per source is enough, switching audio/video costs\n"
+            "nothing. The memory lives in downloads.json and survives\n"
+            "restarts. 0 disables it, so every URL is always validated\n"
+            "from scratch."
         )
         validation_grid.addWidget(
             QLabel("Trust a download for at most:"), 0, 0
