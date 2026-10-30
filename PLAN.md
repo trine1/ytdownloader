@@ -767,7 +767,7 @@ Added to PLAN.md (Basic requirements + Features):
   installer so that the tree, the release, and *every commit and tag* hold
   exactly one installer — the latest.
 
-### Unreleased — automatic updates (2026-10-30)
+### v0.5.8 — automatic updates (2026-10-30)
 - New `yt_downloader/updater.py` (stdlib only: urllib/hashlib/tarfile/
   subprocess — the tool still has exactly two dependencies, PyQt6 +
   yt-dlp). Checks `api.github.com/.../releases/latest`, compares the tag
@@ -811,3 +811,6 @@ Added to PLAN.md (Basic requirements + Features):
   then the restored install re-verified. All previous suites re-run with
   `YTDOWNLOADER_NO_UPDATE=1` (smoke, width, row-buttons, uicheck, toast,
   slot-arg, yt-dlp, killer + the 7-state X reproducer) — green.
+- Shipped as **v0.5.8**; the v0.5.7 release and local artifacts were
+  removed and the 0.5.7 installer purged from history, so again exactly
+  one installer exists anywhere — the latest.
