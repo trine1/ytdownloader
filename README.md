@@ -49,10 +49,42 @@ python -m yt_downloader
 
 - Complete YouTube URLs (`https://www.youtube.com/watch?v=ID`, `https://youtu.be/ID`).
 - Bare video IDs (the `v=` value, exactly 11 characters).
-- **Invidious front-end URLs**, e.g.
-  `https://inv.nadeko.net/watch?v=wW7oTRyqXLE` or
-  `https://invidious.tiekoetter.com/watch?v=wW7oTRyqXLE`
-  (any instance works; passed straight to yt-dlp).
+- **Invidious front-end URLs** — any instance, e.g.
+  `https://yt.chocolatemoo53.com/watch?v=kGeCeK85sUg&t=15`,
+  `https://inv.nadeko.net/watch?v=wW7oTRyqXLE`, `/shorts/`, `/embed/`, `/v/`,
+  or an instance hosted under a subpath. An instance link is just YouTube's
+  video id on somebody else's hostname, so it is recognised **by shape, not by
+  a list of instances**: every instance that exists (or will exist) works, and
+  counts as the same video as its `youtube.com` twin. yt-dlp has no Invidious
+  extractor, so the app resolves the link itself — see
+  [Sources and routes](#sources-and-routes).
+- Anything else yt-dlp understands directly (Vimeo and the ~1700 other
+  extractors) is passed through unchanged.
+
+## Sources and routes
+
+For a link that names a YouTube video, the app tries these routes in order,
+and remembers per video which one worked, so retries start on the winner:
+
+1. **YouTube** — the canonical `https://www.youtube.com/watch?v=ID`. Preferred,
+   because yt-dlp's own extractor knows the format catalogue, the real title
+   (so files are named after the video, not the id) and YouTube's quirks. This
+   is what answers for ordinary links and for instance links whenever YouTube
+   is reachable.
+2. **The instance you linked** — used when YouTube refuses (a geo-block, an
+   age gate, a bot check, an IP YouTube dislikes — the reasons people use
+   Invidious). The title comes from the instance's JSON API
+   (`/api/v1/videos/ID`, which answers even when its HTML page is behind a
+   bot challenge) and the media from its DASH manifest
+   (`/api/manifest/dash/id/ID`), which yt-dlp reads happily. If the API is
+   disabled the manifest probe proves the source instead, and the known title
+   is still written into the filename.
+
+The validation label tells you which one answered: a plain
+*"✓ Many Rivers To Cross"* came from YouTube, *"✓ Many Rivers To Cross
+(via yt.chocolatemoo53.com)"* came from your instance. If both refuse, the
+error says so: *"✗ Invalid: invalid URL or video unavailable;
+yt.chocolatemoo53.com did not answer"*.
 
 ## Features
 
@@ -78,10 +110,10 @@ python -m yt_downloader
     proof is remembered **for the source, in any format**, for the last hour
     (default — configurable under **Settings → Preferences → URL validation**,
     `0` disables it). Entering the same ID/URL again — in either format, in
-    any of its link shapes — reuses the remembered title instead of
-    re-hitting YouTube: *"✓ Never Gonna Give You Up (validated 12 min ago —
-    not re-validated)"*. One validation per source per window is all it
-    takes. This memory lives on disk
+    any of its link shapes (YouTube's *or* any Invidious instance's) — reuses
+    the remembered title instead of re-hitting the network: *"✓ Never Gonna
+    Give You Up (validated 12 min ago — not re-validated)"*. One validation
+    per source per window is all it takes. This memory lives on disk
     (`~/.local/share/ytdownloader/downloads.json`, next to `state.json`), so
     it survives restarts; clearing the Downloads list does not erase it.
 - **Explicit start only**: nothing downloads until you press **Download**
@@ -229,6 +261,27 @@ restored into the Downloads list (it is memory, not state).
   installs and upgrades, and **`--uninstall` keeps your `state.json`** (queue,
   settings, notification preferences) while removing the app, launcher and
   desktop entry.
+
+## Tests
+
+The suites live in `tests/` and are **hermetic**: each one redirects the app's
+state and history files into a temporary directory, stubs the queue pump,
+dialogs, yt-dlp and the network, so running them cannot start a real download,
+write to `~/.local/share/ytdownloader`, or spend a request.
+
+```bash
+export QT_QPA_PLATFORM=offscreen YTDOWNLOADER_NO_UPDATE=1
+.venv/bin/python tests/test_routes.py            # recognition + route walking
+.venv/bin/python tests/test_validation_flow.py   # MainWindow's local-first checks
+.venv/bin/python tests/live_check_invidious.py   # REAL network + REAL yt-dlp (opt-in)
+```
+
+`test_routes.py` and `test_validation_flow.py` make any accidental network use
+fail loudly (urllib is wired to raise), so they are safe to run any time.
+`live_check_invidious.py` deliberately uses the network and a live instance to
+prove both routes end to end; it prints `SKIPPED` and exits 0 when the instance
+is offline. Point it at another instance/video with `YTD_LIVE_HOST` and
+`YTD_LIVE_ID`.
 
 ## Releases
 

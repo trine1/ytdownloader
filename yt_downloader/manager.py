@@ -2,32 +2,28 @@
 
 from __future__ import annotations
 
-import os
-import re
 from typing import Any, Dict, List, Optional
 
 from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 
+from . import sources
 from .worker import DownloadItem, Worker, format_seconds
 
 # Canonical source key for duplicate detection: most YouTube link shapes can
-# be reduced to their 11-character video id.
-_SOURCE_ID_RES = tuple(
-    re.compile(pattern) for pattern in (
-        r"[?&]v=([A-Za-z0-9_-]{11})(?:&|$)",
-        r"youtu\.be/([A-Za-z0-9_-]{11})",
-        r"/(?:shorts|embed|live)/([A-Za-z0-9_-]{11})",
-    )
-)
+# be reduced to their 11-character video id. The patterns live in
+# yt_downloader.sources because the same id is what recognises a link as an
+# Invidious (or Piped, or any mirror's) way of spelling a YouTube video.
+_SOURCE_ID_RES = sources.VIDEO_ID_PATTERNS
 
 
 def _canonical_source(url: str) -> str:
-    """Reduce a YouTube URL of any shape to its video id, else pass through."""
-    for res in _SOURCE_ID_RES:
-        m = res.search(url or "")
-        if m:
-            return m.group(1)
-    return url or ""
+    """Reduce a YouTube URL of any shape to its video id, else pass through.
+
+    Host-agnostic on purpose: ``youtube.com/watch?v=ID`` and
+    ``<any-invidious-instance>/watch?v=ID`` are the same video and must
+    dedupe, match history and route identically.
+    """
+    return sources.video_id_of(url or "") or (url or "")
 
 
 def dispose_worker(worker) -> None:

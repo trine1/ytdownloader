@@ -32,7 +32,7 @@ from PyQt6.QtWidgets import (
 )
 
 from . import __version__ as APP_VERSION
-from . import dbus_notify, updater
+from . import dbus_notify, sources, updater
 from .history import DownloadHistory
 from .manager import DownloadManager, _canonical_source
 from .settings_dialog import SettingsDialog
@@ -796,7 +796,9 @@ class MainWindow(QMainWindow):
             )
             return
 
-        # 4) Otherwise ask YouTube (debounced, off-thread).
+        # 4) Otherwise ask the network (debounced, off-thread): the worker
+        #    tries YouTube and, for an Invidious-style link, the instance
+        #    itself.
         self._remembered_duplicate = None
         self._validating_text = text
         self.validation_label.setText("Validating…")
@@ -834,7 +836,11 @@ class MainWindow(QMainWindow):
             )
             self._validated_url = resolved_url
             self._validated_title = title_or_error
-            self.validation_label.setText(f"✓  {title_or_error}")
+            # Say so when the answer came from the user's own instance
+            # rather than from YouTube — that is worth knowing.
+            note = ("" if sources.is_youtube_host(resolved_url)
+                    else f"  (via {sources.host_of(resolved_url)})")
+            self.validation_label.setText(f"✓  {title_or_error}{note}")
             self.validation_label.setStyleSheet("color: #0a0; font-size: 13px; font-weight: bold;")
         else:
             self._validated_url = None

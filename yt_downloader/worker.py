@@ -6,9 +6,13 @@ progress, status lines and the destination file path back to the GUI thread.
 
 Two operations are supported:
 
-* **validation** - check a YouTube URL / video ID without downloading anything
+* **validation** - check a video URL / ID without downloading anything
 * **download** - download a single item as audio-only or best audio/video and
   report progress (percent + ETA) plus the destination file path.
+
+Both go through :mod:`yt_downloader.sources`, which knows that an Invidious
+instance link and the YouTube link beside it are the *same* video, and hands
+yt-dlp whichever route is most likely to answer.
 """
 
 from __future__ import annotations
@@ -24,6 +28,8 @@ from pathlib import Path
 from typing import List, Optional
 
 from PyQt6.QtCore import QThread, pyqtSignal
+
+from . import sources
 
 # A YouTube video id is exactly 11 characters: [A-Za-z0-9_-]
 YOUTUBE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
@@ -163,6 +169,29 @@ def output_template_for(item: DownloadItem) -> str:
     )
 
 
+def instance_template_for(item: DownloadItem) -> str:
+    """-o template that writes a *known* title into the filename.
+
+    On the instance route yt-dlp reads a bare DASH manifest, which its
+    generic extractor titles with the video id: ``%(title)s`` alone would
+    produce ``kGeCeK85sUg [audio].opus``. The real title is already known
+    (validation got it from the instance's API), so it is put in literally —
+    with ``%`` doubled because the template engine would otherwise read
+    ``%(foo)s`` inside it, and with path separators replaced because a ``/``
+    in a template means "subdirectory". Falls back to the ordinary template
+    while no title is known.
+    """
+    title = re.sub(r"\s+", " ", (item.title or "").strip())
+    if not title:
+        return output_template_for(item)
+    title = title.replace("%", "%%").replace("/", "-").replace("\\", "-")
+    filename_suffix = "audio" if item.kind == "audio" else "video"
+    return os.path.join(
+        item.output_dir,
+        f"{title} [{filename_suffix}].%(ext)s",
+    )
+
+
 @dataclass
 class DownloadItem:
     """A single queued download."""
@@ -215,6 +244,8 @@ class Worker(QThread):
         self._proc: Optional[subprocess.Popen] = None
         self._stopped = False
         self._destination: Optional[str] = None
+        self._resume = False
+        self._start_error = YTDLP_MISSING
 
     def validate(self, text: str) -> None:
         """Validate *text* (URL or bare video id)."""
@@ -270,6 +301,53 @@ class Worker(QThread):
         if not cmd:
             self.validated.emit(False, self._url, YTDLP_MISSING)
             return
+
+        complaints: List[str] = []
+        for route in sources.routes(self._url):
+            if route.kind == "invidious":
+                # Proved through the instance's API rather than yt-dlp: the
+                # JSON endpoint answers even when the instance's HTML page is
+                # behind a bot challenge, and it carries the real title (the
+                # DASH manifest yt-dlp reads is titled by the bare video id).
+                title = sources.instance_title(
+                    route.instance_base, route.video_id)
+                if title:
+                    sources.remember(route.video_id, route.kind)
+                    self.validated.emit(True, route.resolved, title)
+                    return
+                complaints.append(
+                    f"{sources.host_of(route.instance_base)} did not answer")
+                # Instances with the public API disabled still serve their
+                # manifest: let yt-dlp vouch for the video directly.
+                ok, title_or_error = self._validate_once(cmd, route.url)
+                if self._stopped:
+                    self._stopped = False
+                    self.validated.emit(False, self._url, "cancelled")
+                    return
+                if ok:
+                    sources.remember(route.video_id, route.kind)
+                    self.validated.emit(True, route.resolved, title_or_error)
+                    return
+                complaints.append(title_or_error)
+                continue
+
+            ok, title_or_error = self._validate_once(cmd, route.url)
+            if self._stopped:
+                self._stopped = False
+                self.validated.emit(False, self._url, "cancelled")
+                return
+            if ok:
+                sources.remember(route.video_id, route.kind)
+                self.validated.emit(True, route.resolved, title_or_error)
+                return
+            complaints.append(title_or_error)
+
+        message = ("; ".join(dict.fromkeys(complaints))
+                   if complaints else "invalid URL or video unavailable")
+        self.validated.emit(False, self._url, message)
+
+    def _validate_once(self, cmd: List[str], url: str):
+        """Probe *url* for its id and title: ``(ok, title_or_error)``."""
         args = [
             *cmd,
             "--no-playlist",
@@ -281,7 +359,7 @@ class Worker(QThread):
             "id:%(id)s",
             "--print",
             "title:%(title)s",
-            self._url,
+            url,
         ]
         try:
             self._proc = subprocess.Popen(
@@ -291,13 +369,11 @@ class Worker(QThread):
                 text=True,
             )
         except FileNotFoundError:
-            self.validated.emit(False, self._url, YTDLP_MISSING)
             self._proc = None
-            return
+            return False, YTDLP_MISSING
         except OSError as exc:
-            self.validated.emit(False, self._url, f"failed to start yt-dlp: {exc}")
             self._proc = None
-            return
+            return False, f"failed to start yt-dlp: {exc}"
 
         title = ""
         assert self._proc.stdout is not None
@@ -309,30 +385,89 @@ class Worker(QThread):
         self._proc = None
 
         if self._stopped:
-            self._stopped = False
-            self.validated.emit(False, self._url, "cancelled")
-            return
-
+            return False, "cancelled"
         if returncode != 0:
-            self.validated.emit(False, self._url, "invalid URL or video unavailable")
-            return
-
+            return False, "invalid URL or video unavailable"
         if title:
-            self.validated.emit(True, self._url, title)
-        else:
-            self.validated.emit(False, self._url, "could not retrieve video info")
+            return True, title
+        return False, "could not retrieve video info"
 
     # ---- download --------------------------------------------------------
     def _run_download(self) -> None:
         assert self._item is not None
         item = self._item
         os.makedirs(item.output_dir, exist_ok=True)
-        output_template = output_template_for(item)
 
         cmd = ytdlp_command()
         if not cmd:
             self.finished.emit(False, YTDLP_MISSING, None)
             return
+
+        # One attempt may walk several routes: the YouTube link the user's
+        # instance mirrors, and the instance itself when YouTube refuses.
+        candidates = sources.routes(item.url)
+        tried: List[str] = []
+        returncode = 1
+        for index, route in enumerate(candidates):
+            if index:
+                self.status.emit(
+                    f"{tried[-1]} did not work — trying {route.label} ...")
+            if route.kind == "invidious" and not item.title and route.video_id:
+                # The instance's API knows the title even when its HTML page
+                # is challenged, so keep the row (and the filename) readable.
+                title = sources.instance_title(
+                    route.instance_base, route.video_id)
+                if title:
+                    item.title = title
+                    self.resolved_title.emit(title)
+            if route.kind == "invidious":
+                template = instance_template_for(item)
+            else:
+                template = output_template_for(item)
+            # Only name the route when there is a choice to make: a plain
+            # YouTube link keeps the status line it always had.
+            where = f" from {route.label}" if len(candidates) > 1 else ""
+            self.status.emit(f"Starting {item.kind} download{where} ...")
+            returncode = self._download_once(cmd, item, route.url, template)
+
+            if self._stopped:
+                self._stopped = False
+                self.status.emit("Download cancelled.")
+                self.finished.emit(False, "cancelled", self._destination)
+                return
+            if returncode is None:
+                # yt-dlp could not even be launched: switching routes would
+                # hit the same wall, so report it straight away.
+                self.finished.emit(False, self._start_error, None)
+                return
+            if returncode == 0:
+                sources.remember(route.video_id, route.kind)
+                break
+            tried.append(route.label)
+
+        ok = returncode == 0
+        if ok:
+            message = "download complete"
+        elif len(tried) > 1:
+            message = (f"unavailable from {' and '.join(tried)} "
+                       f"(yt-dlp exited with {returncode})")
+        else:
+            message = f"yt-dlp exited with {returncode}"
+        if ok:
+            # Completion verification runs HERE, in the worker thread — never
+            # on the UI thread — so the window cannot freeze between yt-dlp
+            # finishing and the row flipping to its completed state.
+            err = verify_completion(item.kind, self._destination)
+            if err:
+                ok = False
+                message = f"verification failed: {err}"
+        self.finished.emit(ok, message, self._destination)
+
+    def _download_once(self, cmd: List[str], item: DownloadItem,
+                       url: str, output_template: str) -> Optional[int]:
+        """One yt-dlp run for *url*; its exit code, or None if it never
+        started (``self._start_error`` then explains why)."""
+        self._destination = None
         args = [*cmd, "--no-playlist", "--extractor-args", "youtube:player_client=android"]
         if getattr(self, "_resume", False):
             # Resume a partially downloaded file.
@@ -352,9 +487,8 @@ class Worker(QThread):
                 "--merge-output-format",
                 "mkv",
             ]
-        args += ["-o", output_template, item.url]
+        args += ["-o", output_template, url]
 
-        self.status.emit(f"Starting {item.kind} download ...")
         try:
             self._proc = subprocess.Popen(
                 args,
@@ -363,13 +497,13 @@ class Worker(QThread):
                 text=True,
             )
         except FileNotFoundError:
-            self.finished.emit(False, YTDLP_MISSING, None)
             self._proc = None
-            return
+            self._start_error = YTDLP_MISSING
+            return None
         except OSError as exc:
-            self.finished.emit(False, f"failed to start yt-dlp: {exc}", None)
             self._proc = None
-            return
+            self._start_error = f"failed to start yt-dlp: {exc}"
+            return None
 
         assert self._proc.stdout is not None
         for line in self._proc.stdout:
@@ -389,8 +523,7 @@ class Worker(QThread):
                 self._destination = dest_match.group("path").strip()
                 # Derive the human-friendly title from the first destination
                 # filename we see (yt-dlp keeps the video title, sanitised).
-                item = self._item
-                if item is not None and not getattr(item, "title", ""):
+                if not getattr(item, "title", ""):
                     stem = os.path.splitext(self._destination)[0]
                     title = os.path.basename(stem).strip()
                     # Drop the per-format suffix (added for filename
@@ -402,28 +535,7 @@ class Worker(QThread):
 
         returncode = self._proc.wait() if self._proc is not None else 1
         self._proc = None
-
-        if self._stopped:
-            self._stopped = False
-            self.status.emit("Download cancelled.")
-            self.finished.emit(False, "cancelled", self._destination)
-            return
-
-        ok = returncode == 0
-        message = (
-            "download complete"
-            if ok
-            else f"yt-dlp exited with {returncode}"
-        )
-        if ok:
-            # Completion verification runs HERE, in the worker thread — never
-            # on the UI thread — so the window cannot freeze between yt-dlp
-            # finishing and the row flipping to its completed state.
-            err = verify_completion(item.kind, self._destination)
-            if err:
-                ok = False
-                message = f"verification failed: {err}"
-        self.finished.emit(ok, message, self._destination)
+        return returncode
 
     @staticmethod
     def _parse_eta(eta: str) -> int:

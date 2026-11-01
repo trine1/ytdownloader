@@ -126,6 +126,10 @@ Added to PLAN.md (Basic requirements + Features):
 - Fix: pass `--extractor-args "youtube:player_client=android"` to all yt-dlp invocations (validation + download). The Android client is not rate-limited and resolves the video.
 - `wW7oTRyqXLE` now validates (`Dorothy Moore - Misty Blue`) and downloads end-to-end.
 - Note: `inv.nadeko.net` (Invidious frontend) is currently down (502 Bad Gateway, API disabled); full Invidious URLs are still accepted as-is since yt-dlp supports them natively via URL passthrough, but instances are unreliable.
+  - **CORRECTION (2026-11-01):** that last claim was never true. `yt-dlp
+    --list-extractors` has no Invidious extractor, so a pasted instance link
+    fell to the `generic` extractor and died with `Unsupported URL`. Only the
+    bare-id case worked. Fixed for real in the routing batch below.
 - Regression: regular YouTube IDs/URLs still work with the Android client.
 
 ### Feature: pause/resume per active download (2026-10-25)
@@ -913,3 +917,68 @@ Added to PLAN.md (Basic requirements + Features):
 - Shipped as **v0.5.9**; the v0.5.8 release and local artifacts were
   removed and its installer purged from history, so again exactly one
   installer exists anywhere — the latest.
+
+### Unreleased — Invidious instances actually supported (2026-11-01)
+- **Reported bug**: `https://yt.chocolatemoo53.com/watch?v=kGeCeK85sUg&t=15`
+  failed. Root cause: yt-dlp has **no Invidious extractor** (verified with
+  `--list-extractors`), so any instance link reached the `generic` extractor
+  and died with `Unsupported URL` — the v0.2.0 note claiming "yt-dlp supports
+  them natively via passthrough" was wrong, and the README repeated it. The
+  video itself was fine: YouTube serves it, and the instance's API returns 21
+  DASH formats with no prohibition.
+- New `yt_downloader/sources.py`: recognises a video by **URL shape, never by
+  a host list**, so every Invidious/Piped instance — existing or future — is
+  handled, along with `/watch?v=`, `/watch/ID`, `/shorts/`, `/embed/`,
+  `/live/`, `/v/` and instances mounted under a subpath. Recognition keeps
+  the same id the dedupe/history already used (`manager._canonical_source`
+  now delegates to it, single source of truth; `/v/` and `/watch/ID` added).
+- **Two routes, ordered, remembered per video id** (`sources.routes()`):
+  1. `youtube` — canonical `www.youtube.com/watch?v=ID` (yt-dlp's own
+     extractor: real titles, full format catalogue). Tried first, and for
+     plain YouTube links the *only* route: their behaviour is untouched, down
+     to the unchanged `Starting audio download ...` status line.
+  2. `invidious` — the instance the user linked, when YouTube refuses (geo
+     block / age gate / bot check / an IP YouTube dislikes, i.e. exactly the
+     reasons to use an instance): title from `/api/v1/videos/ID` (its JSON API
+     answers even though the HTML page sits behind a slider challenge), media
+     from `/api/manifest/dash/id/ID`, which yt-dlp's generic MPD support
+     downloads with merging and audio extraction intact (verified live).
+     API disabled? the manifest probe proves the source instead.
+  `remember()` keeps the winning route for the process, so retries and repeat
+  downloads start there instead of re-probing a route that already failed.
+- `Worker._run_validation` / `_run_download` walk the route list; a launch
+  failure (no yt-dlp) does not burn the second route, cancellation stops the
+  walk immediately, and when both routes refuse the error names both
+  ("invalid URL or video unavailable; yt.chocolatemoo53.com did not answer").
+- **Filenames stay readable on the instance route**: the generic extractor
+  titles a bare manifest by the video id, so `instance_template_for()` writes
+  the known title into `-o` literally (`%` doubled for the template engine,
+  `/` and `\` replaced so they cannot become path separators), falling back to
+  `%(title)s` while no title is known. `_run_download` fills a missing title
+  from the instance API first (row title + filename).
+- Validation label says which route answered: `✓ <title>` for YouTube,
+  `✓ <title> (via yt.chocolatemoo53.com)` for the instance.
+- Nothing else needed changing: instance links already canonicalised to the
+  video id, so the completed-row/live-row/source-proof short-circuits and the
+  download cache apply to them as much as to YouTube links (now asserted).
+- `sources.py` never raises: probes that cannot reach their host return None
+  and the caller falls through.
+- **Tests moved into the repo** (`tests/`): the per-session suites had lived in
+  `/tmp/opencode`, which got cleaned, so they are recreated as committed files
+  — `test_routes.py` (152 checks: shapes, hosts, route ordering and the
+  per-video cache, URL builders, fetch_json tolerance, filename escaping, and
+  the whole validation/download route walk with a fake yt-dlp) and
+  `test_validation_flow.py` (70 checks: the MainWindow local-first order,
+  format-free proofs, expiry, restart persistence, queueing, dedupe). Both are
+  hermetic — state/history redirected to a temp dir, dialogs and the queue
+  pump stubbed, and urllib wired to raise, so an accidental request fails the
+  suite instead of quietly spending a request.
+  - This caught a real leak mid-write: one check used the *unstubbed* probe and
+    fetched the live instance's title, which is exactly the silent-network-test
+    failure mode the blocker is there to prevent.
+- `tests/live_check_invidious.py`: the deliberate network test — boots a
+  window, validates and downloads the reported link for real, then forces the
+  YouTube route to a dead endpoint to prove the instance rescue (validation
+  via the API, download via the manifest, ffprobe-verified output) and that
+  both link shapes dedupe to one source. Prints SKIPPED/exits 0 if the
+  instance is offline, so it can never pass by accident.
