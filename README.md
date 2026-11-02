@@ -169,9 +169,13 @@ yt.chocolatemoo53.com did not answer"*.
   downloads run, the confirmation dialog reminds you that they will be
   automatically resumed next time. **Shift+Ctrl+Q** exits immediately without
   prompting (state is still saved).
-- **Help menu** shows the app, yt-dlp, ffmpeg and Python versions — including
+- **Help menu**: **How to use…** is a short overview of what may be pasted
+  into the Source field (YouTube URLs, bare 11-character IDs, any Invidious
+  instance link, shorts/embed/live links, and anything yt-dlp extracts
+  directly) and how the flow goes (validate → Download / Add to queue);
+  **Version** shows the app, yt-dlp, ffmpeg and Python versions — including
   *which* yt-dlp copy the app resolved (own environment / `PATH` /
-  `python -m yt_dlp`).
+  `python -m yt_dlp`); **Check for updates…** looks for a newer release.
 - **Newest yt-dlp, automatically**: the app prefers the yt-dlp inside its own
   environment, which the installers refresh from PyPI on every install, so a
   download breakage fixed upstream can be picked up without waiting for a

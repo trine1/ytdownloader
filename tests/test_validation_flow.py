@@ -315,6 +315,34 @@ check(VALIDATED == [], "a completed download is still a proof")
 check("downloaded" in label(win2),
       f"and is called 'downloaded', not 'validated': {label(win2)!r}")
 
+# ============ 14. the Source field is clean, the hint lives below ========
+check(win2.url_input.placeholderText() == "",
+      "the Source field carries no placeholder text")
+check(label(win2) == "Enter a URL or ID to validate" or "✓" in label(win2)
+      or "✗" in label(win2) or "Already" in label(win2),
+      "the hint underneath the field still speaks for itself")
+
+# ============ 15. Help -> How to use… ===================================
+menu_bar = win2.menuBar()
+top_level = [a.text().replace("&", "") for a in menu_bar.actions()]
+howto = None
+for menu_action in menu_bar.actions():
+    menu = menu_action.menu()
+    if menu is None:
+        continue
+    for action in menu.actions():
+        if action.text().replace("&", "").startswith("How to use"):
+            howto = action
+check(howto is not None, f"the Help menu offers a How to use entry: {top_level}")
+DIALOGS.clear()
+win2._show_how_to_use()
+check(len(DIALOGS) == 1 and DIALOGS[0][0] == "information",
+      "it opens an information dialog")
+text = DIALOGS[0][2] if DIALOGS else ""
+for needle in ("youtu.be", "video ID", "Invidious", "Shorts", "Vimeo",
+               "Download"):
+    check(needle in text, f"the overview mentions {needle!r}")
+
 print()
 print(f"checks: {len(PASS) + len(FAIL)}   passed: {len(PASS)}   failed: {len(FAIL)}")
 print("RESULT: ALL PASS" if not FAIL else f"RESULT: {len(FAIL)} FAILURES")

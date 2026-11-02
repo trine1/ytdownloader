@@ -507,6 +507,9 @@ class MainWindow(QMainWindow):
         settings_action = settings_menu.addAction("&Preferences…")
         settings_action.triggered.connect(self._open_settings)
         help_menu = menu_bar.addMenu("&Help")
+        howto_action = help_menu.addAction("&How to use…")
+        howto_action.setStatusTip("What you can paste into the Source field")
+        howto_action.triggered.connect(self._show_how_to_use)
         version_action = help_menu.addAction("&Version")
         version_action.setStatusTip("Show the current version of this tool")
         version_action.triggered.connect(self._show_version)
@@ -520,9 +523,6 @@ class MainWindow(QMainWindow):
         src_row = QHBoxLayout()
         src_row.addWidget(QLabel("Source"))
         self.url_input = QLineEdit()
-        self.url_input.setPlaceholderText(
-            "YouTube/Invidious URL or video ID (e.g. dQw4w9WgXcQ)"
-        )
         src_row.addWidget(self.url_input, stretch=1)
         layout.addLayout(src_row)
 
@@ -1139,6 +1139,27 @@ class MainWindow(QMainWindow):
         self.close()
 
     @_safe_slot
+    def _show_how_to_use(self) -> None:
+        """Help -> How to use… — what can be pasted into Source."""
+        QMessageBox.information(
+            self,
+            f"{APP_TITLE} — How to use",
+            "Paste any of these into the Source field:\n\n"
+            "• YouTube URL\n"
+            "    https://www.youtube.com/watch?v=dQw4w9WgXcQ\n"
+            "    https://youtu.be/dQw4w9WgXcQ\n\n"
+            "• Bare video ID — the 11 characters after \"v=\"\n"
+            "    dQw4w9WgXcQ\n\n"
+            "• Invidious instance link — any instance, no list needed\n"
+            "    https://yt.chocolatemoo53.com/watch?v=dQw4w9WgXcQ\n\n"
+            "• Shorts, embed, live and /v/ links, and playlist links\n"
+            "    (the video itself is used)\n\n"
+            "Anything yt-dlp understands directly (Vimeo, …) works too.\n\n"
+            "The title appears once the source is confirmed; press\n"
+            "Download to start, or Add to queue to go later. The same\n"
+            "video is recognised however you spell its link.",
+        )
+
     def _show_version(self) -> None:
         ytdlp = ytdlp_version() or "not found"
         ffmpeg = ffmpeg_version() or "not found"

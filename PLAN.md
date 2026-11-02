@@ -982,3 +982,16 @@ Added to PLAN.md (Basic requirements + Features):
   via the API, download via the manifest, ffprobe-verified output) and that
   both link shapes dedupe to one source. Prints SKIPPED/exits 0 if the
   instance is offline, so it can never pass by accident.
+
+### Unreleased — Source hint moved out of the field; Help → How to use (2026-11-01)
+- The Source field no longer carries placeholder text (the
+  "YouTube/Invidious URL or video ID (e.g. dQw4w9WgXcQ)" hint from v0.5.4 is
+  gone). The hint underneath the field — the italic validation label that
+  starts as "Enter a URL or ID to validate" — is kept and remains the only
+  in-window guidance; the field itself is now clean while empty.
+- New **Help → How to use…** dialog: a brief overview of what may be pasted
+  into Source (YouTube watch/youtu.be URLs, bare 11-char IDs, Invidious
+  instance links — any instance — shorts/embed/live//v//playlist links, and
+  anything yt-dlp extracts directly), plus the validate → Download/Add-to-queue
+  flow and the note that all spellings of one video are recognised as the same
+  source. Menu order: How to use…, Version, Check for updates….
