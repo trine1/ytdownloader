@@ -7,6 +7,10 @@ venv/
 
 # Build artifacts (regenerated with build_deb.py / dpkg-buildpackage)
 *.deb
+# Release installers: only ONE may exist anywhere in history (only-latest
+# policy), so adding one must be a deliberate `git add -f`, never a stray
+# rebuild picked up by `git add -A`.
+ytdownloader-*-linux-installer.sh
 debian/.debhelper/
 debian/ytdownloader/
 debian/files

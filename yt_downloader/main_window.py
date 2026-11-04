@@ -1085,13 +1085,24 @@ class MainWindow(QMainWindow):
         # A single completed download already raised its own "Download
         # complete" toast, so summarising it would just repeat the same
         # news: only summarise once more than one download finished.
-        # Failures are still always reported — they have no per-item toast.
+        # Failures are still always reported — they have no per-item toast,
+        # so a batch that ends in failures ALWAYS raises this summary, even
+        # when nothing finished at all (a failure-only batch is never
+        # skipped: it would otherwise go unannounced).
         if done == 1 and not failed:
             return
-        parts = [f"{done} finished"]
+        parts = []
+        if done:
+            parts.append(f"{done} finished")
         if failed:
             parts.append(f"{failed} failed")
-        summary = "All downloads finished" if done else "All downloads failed"
+        # Title must match the body: a mixed batch did not "all finish".
+        if failed and done:
+            summary = "Downloads finished with errors"
+        elif failed:
+            summary = "All downloads failed"
+        else:
+            summary = "All downloads finished"
         dbus_notify.notify_async(summary, ", ".join(parts))
 
     # ------------------------------------------------------------------ state persistence

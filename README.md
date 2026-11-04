@@ -250,9 +250,9 @@ restored into the Downloads list (it is memory, not state).
   `ytdownloader-<version>-linux-installer.sh`:
 
   ```bash
-  bash ytdownloader-0.5.9-linux-installer.sh            # install to ~/.local
-  bash ytdownloader-0.5.9-linux-installer.sh --help     # options
-  bash ytdownloader-0.5.9-linux-installer.sh --uninstall
+  bash ytdownloader-0.5.10-linux-installer.sh            # install to ~/.local
+  bash ytdownloader-0.5.10-linux-installer.sh --help     # options
+  bash ytdownloader-0.5.10-linux-installer.sh --uninstall
   ```
 
   It installs into `~/.local/share/ytdownloader` (isolated venv), pip-installs
@@ -277,15 +277,16 @@ write to `~/.local/share/ytdownloader`, or spend a request.
 export QT_QPA_PLATFORM=offscreen YTDOWNLOADER_NO_UPDATE=1
 .venv/bin/python tests/test_routes.py            # recognition + route walking
 .venv/bin/python tests/test_validation_flow.py   # MainWindow's local-first checks
+.venv/bin/python tests/test_toast.py             # batch-summary notification rules
 .venv/bin/python tests/live_check_invidious.py   # REAL network + REAL yt-dlp (opt-in)
 ```
 
-`test_routes.py` and `test_validation_flow.py` make any accidental network use
-fail loudly (urllib is wired to raise), so they are safe to run any time.
-`live_check_invidious.py` deliberately uses the network and a live instance to
-prove both routes end to end; it prints `SKIPPED` and exits 0 when the instance
-is offline. Point it at another instance/video with `YTD_LIVE_HOST` and
-`YTD_LIVE_ID`.
+`test_routes.py`, `test_validation_flow.py` and `test_toast.py` make any
+accidental network use fail loudly (urllib is wired to raise), so they are safe
+to run any time. `live_check_invidious.py` deliberately uses the network and a
+live instance to prove both routes end to end; it prints `SKIPPED` and exits 0
+when the instance is offline. Point it at another instance/video with
+`YTD_LIVE_HOST` and `YTD_LIVE_ID`.
 
 ## Releases
 

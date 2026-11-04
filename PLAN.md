@@ -918,7 +918,7 @@ Added to PLAN.md (Basic requirements + Features):
   removed and its installer purged from history, so again exactly one
   installer exists anywhere — the latest.
 
-### Unreleased — Invidious instances actually supported (2026-11-01)
+### v0.5.10 — Invidious instances actually supported (2026-11-01)
 - **Reported bug**: `https://yt.chocolatemoo53.com/watch?v=kGeCeK85sUg&t=15`
   failed. Root cause: yt-dlp has **no Invidious extractor** (verified with
   `--list-extractors`), so any instance link reached the `generic` extractor
@@ -983,7 +983,7 @@ Added to PLAN.md (Basic requirements + Features):
   both link shapes dedupe to one source. Prints SKIPPED/exits 0 if the
   instance is offline, so it can never pass by accident.
 
-### Unreleased — Source hint moved out of the field; Help → How to use (2026-11-01)
+### v0.5.10 — Source hint moved out of the field; Help → How to use (2026-11-01)
 - The Source field no longer carries placeholder text (the
   "YouTube/Invidious URL or video ID (e.g. dQw4w9WgXcQ)" hint from v0.5.4 is
   gone). The hint underneath the field — the italic validation label that
@@ -995,3 +995,37 @@ Added to PLAN.md (Basic requirements + Features):
   anything yt-dlp extracts directly), plus the validate → Download/Add-to-queue
   flow and the note that all spellings of one video are recognised as the same
   source. Menu order: How to use…, Version, Check for updates….
+
+### v0.5.10 — release housekeeping: toast rule, gitignored installers, tag purge (2026-11-03)
+- **Open question resolved: a failure-only batch does NOT skip the summary
+  toast.** Failures have no per-item toast — the batch summary is their *only*
+  announcement — so suppressing it for a batch where nothing finished would
+  leave every failure silent. The README already promised the opposite
+  ("Failures are always reported … a batch that ends in failures still raises
+  the summary"), so the code now matches that promise explicitly and it is
+  pinned by `tests/test_toast.py` (26 checks). While in that code, two wording
+  defects were fixed:
+  - a mixed batch used to be titled *"All downloads finished"* while its body
+    said *"... 1 failed"* — now *"Downloads finished with errors"*;
+  - a failure-only batch said *"0 finished, 3 failed"* — now just *"3 failed"*.
+  Unchanged: a lone success is still skipped (it raised its own toast), and
+  `notify_all_done = False` still silences everything.
+- **Installers are gitignored.** `ytdownloader-*-linux-installer.sh` joins
+  `*.deb` in `.gitignore`, so a rebuild cannot be committed by accident and
+  `git status` stays clean between releases. The release installer is still
+  committed deliberately with `git add -f` — the only-latest policy requires
+  exactly one installer to exist anywhere in history, so this makes adding one
+  a conscious act rather than a by-product of `git add -A`.
+- **Old tags purged**: v0.2.0, v0.3.0–v0.3.9, v0.4.0–v0.4.10 and
+  v0.5.0–v0.5.7 are deleted locally and on GitHub (30 tags), leaving only
+  v0.5.8, v0.5.9 and v0.5.10. Their release notes survive in the GitHub
+  releases that still exist and in this file; the tags themselves pointed at
+  long-superseded code and, with the installer purges, at commits whose SHAs
+  have already been rewritten several times.
+- **Only-latest, once more**: the v0.5.9 release is deleted from GitHub and the
+  0.5.9 installer is purged from every commit and tag with
+  `git filter-repo --invert-paths`, so v0.5.10 is the single release and the
+  single installer. `git-filter-repo` had been installed ad hoc into the since
+  wiped `/tmp/opencode`; it is now installed properly via
+  `uv tool install git-filter-repo` (2.47.0) so the next purge does not depend
+  on a temp directory surviving.
