@@ -136,7 +136,10 @@ yt.chocolatemoo53.com did not answer"*.
   merged with ffmpeg)**.
 - **Queueing with parallel downloads**: up to N concurrent downloads (N set in
   Settings).
-- **Progress bar, percent complete, and ETA** for every active download.
+- **Progress bar, percent complete, and ETA** for every active download. The
+  ETA is smoothed — yt-dlp recomputes it from a fresh speed estimate on every
+  progress line, which made the number flicker; a short median filter plus a
+  damped average keeps it steady without letting a wild reading through.
 - **Pause / Resume** on each active download: pause stops the worker without
   counting as a failure; resume continues the partial file
   (`yt-dlp --continue`).
@@ -172,7 +175,7 @@ yt.chocolatemoo53.com did not answer"*.
 - **Help menu**: **How to use…** is a short overview of what may be pasted
   into the Source field (YouTube URLs, bare 11-character IDs, any Invidious
   instance link, shorts/embed/live links, and anything yt-dlp extracts
-  directly) and how the flow goes (validate → Download / Add to queue);
+  directly) and how the flow goes (validate → Download);
   **Version** shows the app, yt-dlp, ffmpeg and Python versions — including
   *which* yt-dlp copy the app resolved (own environment / `PATH` /
   `python -m yt_dlp`); **Check for updates…** looks for a newer release.
@@ -278,14 +281,15 @@ export QT_QPA_PLATFORM=offscreen YTDOWNLOADER_NO_UPDATE=1
 .venv/bin/python tests/test_routes.py            # recognition + route walking
 .venv/bin/python tests/test_validation_flow.py   # MainWindow's local-first checks
 .venv/bin/python tests/test_toast.py             # batch-summary notification rules
+.venv/bin/python tests/test_eta.py               # ETA smoothing + the Help text
 .venv/bin/python tests/live_check_invidious.py   # REAL network + REAL yt-dlp (opt-in)
 ```
 
-`test_routes.py`, `test_validation_flow.py` and `test_toast.py` make any
-accidental network use fail loudly (urllib is wired to raise), so they are safe
-to run any time. `live_check_invidious.py` deliberately uses the network and a
-live instance to prove both routes end to end; it prints `SKIPPED` and exits 0
-when the instance is offline. Point it at another instance/video with
+`test_routes.py`, `test_validation_flow.py`, `test_toast.py` and `test_eta.py`
+make any accidental network use fail loudly (urllib is wired to raise), so they
+are safe to run any time. `live_check_invidious.py` deliberately uses the network
+and a live instance to prove both routes end to end; it prints `SKIPPED` and
+exits 0 when the instance is offline. Point it at another instance/video with
 `YTD_LIVE_HOST` and `YTD_LIVE_ID`.
 
 ## Releases

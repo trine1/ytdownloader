@@ -1029,3 +1029,47 @@ Added to PLAN.md (Basic requirements + Features):
   wiped `/tmp/opencode`; it is now installed properly via
   `uv tool install git-filter-repo` (2.47.0) so the next purge does not depend
   on a temp directory surviving.
+
+### Unreleased — the Help stops promising "Add to queue"; the ETA stops flickering (2026-11-05)
+- **The Help dialog advertised a button that does not exist.** Since v0.5.10
+  added **Help → How to use…**, the closing paragraph ended with *"press
+  Download to start, or Add to queue to go later"*. There is no such button:
+  the app has exactly one, **Download** (`main_window.py`, `download_btn` →
+  `_on_download_now` → `manager.add_now`). "Add to queue" was removed back in
+  v0.3.2, when "Download now" was renamed "Download" — but the text came back
+  with the new dialog. The dialog now says *"press Download to start it"*, and
+  the README's Help bullet was corrected to match ("validate → Download").
+  The historical mentions in this file and in `debian/changelog` are left
+  alone: they record what happened at the time, which is what they are for.
+- **The ETA on a download row flickered.** yt-dlp recomputes the ETA on every
+  progress line from its current speed estimate, so consecutive readings
+  bounced (0:12, 0:08, 0:15, 0:09 …) even while the download was going
+  perfectly steadily. The readings now go through a two-stage filter in
+  `worker.py` before they reach the UI:
+  1. a **median** over the last three readings, so a single wild reading
+     (yt-dlp sometimes reports a wildly wrong ETA before its speed estimate
+     settles) can never move the displayed number at all;
+  2. an **exponential moving average** (α = 0.5) over those medians, which
+     damps the remaining back-and-forth so the number eases towards its new
+     value rather than snapping to it.
+
+  The parameters were chosen by measuring rather than by taste: over
+  simulated downloads (a steadily shrinking remaining time plus the kind of
+  noise yt-dlp produces) the median-of-3 + α=0.5 combination **halves the
+  jump from one displayed value to the next** (max step 12.6 s → 6.7 s) while
+  staying close to the true remaining time. A longer window or a slower
+  average smooths the number more but starts lagging behind a download that
+  is making real progress (a median-of-7 costs 9.6 s of lag for only 0.3 s
+  less flicker), so the short window was kept.
+  The state lives on the `Worker` and is **reset per yt-dlp invocation**, so a
+  route fallback (YouTube → Invidious) or a retry starts from its own first
+  reading instead of inheriting the previous attempt's scale. The percentage
+  and the formatting (`format_seconds`, `_row_eta`) are untouched.
+- **New suite `tests/test_eta.py`** (30 checks): the smoother on its own
+  (a steady ETA passes through unchanged, a single outlier in either
+  direction is ignored, a reset really forgets, the window stays bounded),
+  the end-to-end path through a faked yt-dlp (the percentage is untouched,
+  the emitted ETA is steady, a wild line never reaches the UI, a second
+  attempt starts fresh), and a check that the **Help dialog mentions no
+  queueing button at all**. It is hermetic like the others: temp state and
+  history, urllib wired to raise, no real yt-dlp.

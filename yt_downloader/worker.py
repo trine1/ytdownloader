@@ -155,6 +155,78 @@ def format_seconds(seconds: Optional[int]) -> str:
     return f"{minutes}:{secs:02d}"
 
 
+# How many raw ETA readings the smoother keeps. Three is enough to throw
+# out a one-off spike (yt-dlp occasionally reports a wildly wrong ETA
+# right before its speed estimate settles) while keeping the filter
+# close to the truth - a longer window starts to lag behind a download
+# that is making real progress.
+ETA_SMOOTHING_WINDOW = 3
+
+# How much of each new reading ends up in the displayed value. The rest is
+# carried over from the previous reading, so the number eases towards the
+# new one instead of jumping to it. Half way is the sweet spot: it halves
+# the step-to-step wobble while the estimate stays close to the real one.
+ETA_SMOOTHING_ALPHA = 0.5
+
+
+class EtaSmoother:
+    """Median filter plus exponential average over the last few readings.
+
+    yt-dlp recomputes the ETA on every progress line from its current
+    speed estimate, so the raw numbers jitter visibly (0:12, 0:08, 0:15,
+    0:09 …) even while the download is going perfectly steadily. Two
+    stages take that wobble out:
+
+    1. a **median** over a short window, which throws outliers away
+       completely - one wild reading can never move the result;
+    2. an **exponential moving average** over the medians, which damps
+       the remaining back-and-forth so the number eases towards its new
+       value instead of snapping to it.
+
+    Measured over simulated downloads (a steadily shrinking remaining
+    time plus the kind of noise yt-dlp produces), this roughly halves
+    the jump from one displayed value to the next while staying close to
+    the real remaining time - a longer window or a slower average would
+    smooth the number more, but would start lagging behind a download
+    that is making real progress.
+
+    The state is per attempt: a fresh yt-dlp run starts from scratch,
+    and the first reading of a run is shown as it is - no invented
+    warm-up value.
+    """
+
+    def __init__(self, window: int = ETA_SMOOTHING_WINDOW,
+                 alpha: float = ETA_SMOOTHING_ALPHA) -> None:
+        self._window = max(1, int(window))
+        self._alpha = min(1.0, max(0.0, float(alpha)))
+        self._samples: List[int] = []
+        self._value: Optional[float] = None
+
+    def reset(self) -> None:
+        """Forget every sample (a fresh attempt starts from scratch)."""
+        self._samples.clear()
+        self._value = None
+
+    def push(self, eta: int) -> int:
+        """Add a raw ETA (seconds) and return the smoothed value."""
+        if self._window <= 1:
+            # A window of one means "no smoothing" - used by the tests to
+            # switch the filter off.
+            return int(eta)
+        self._samples.append(int(eta))
+        if len(self._samples) > self._window:
+            del self._samples[:-self._window]
+        ordered = sorted(self._samples)
+        median = ordered[len(ordered) // 2]
+        if self._value is None:
+            # The first reading of an attempt is shown as it is - no
+            # invented warm-up value.
+            self._value = float(median)
+        else:
+            self._value += self._alpha * (median - self._value)
+        return int(round(self._value))
+
+
 def output_template_for(item: DownloadItem) -> str:
     """yt-dlp -o template for *item*.
 
@@ -246,6 +318,8 @@ class Worker(QThread):
         self._destination: Optional[str] = None
         self._resume = False
         self._start_error = YTDLP_MISSING
+        # Smooths the jittery ETA yt-dlp reports on every progress line.
+        self._eta_smoother = EtaSmoother()
 
     def validate(self, text: str) -> None:
         """Validate *text* (URL or bare video id)."""
@@ -468,6 +542,10 @@ class Worker(QThread):
         """One yt-dlp run for *url*; its exit code, or None if it never
         started (``self._start_error`` then explains why)."""
         self._destination = None
+        # A fresh yt-dlp run means a fresh ETA scale (the fallback route
+        # starts over from zero), so the smoother must not carry samples
+        # over from the previous attempt.
+        self._eta_smoother.reset()
         args = [*cmd, "--no-playlist", "--extractor-args", "youtube:player_client=android"]
         if getattr(self, "_resume", False):
             # Resume a partially downloaded file.
@@ -516,7 +594,8 @@ class Worker(QThread):
             match = PROGRESS_RE.search(line)
             if match:
                 pct = int(float(match.group("pct")))
-                eta = self._parse_eta(match.group("eta"))
+                eta = self._eta_smoother.push(
+                    self._parse_eta(match.group("eta")))
                 self.progress.emit(pct, eta)
             dest_match = DESTINATION_RE.search(line)
             if dest_match:

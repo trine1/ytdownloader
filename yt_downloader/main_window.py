@@ -1167,8 +1167,8 @@ class MainWindow(QMainWindow):
             "    (the video itself is used)\n\n"
             "Anything yt-dlp understands directly (Vimeo, …) works too.\n\n"
             "The title appears once the source is confirmed; press\n"
-            "Download to start, or Add to queue to go later. The same\n"
-            "video is recognised however you spell its link.",
+            "Download to start it. The same video is recognised\n"
+            "however you spell its link.",
         )
 
     def _show_version(self) -> None:
